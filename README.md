@@ -122,7 +122,7 @@ Writing cache-friendly code is only half the battle. Unleashing the compiler pus
 <img width="950" height="288" alt="image" src="https://github.com/user-attachments/assets/20a5eec4-4c3e-41bd-8da4-dc9a65a07b68" />
 
 
-With compiler optimizations, the ikj kernel completes **17.18 Billion FLOPs** in just **5.5 seconds**, achieving **~3.2 GFLOPS**. The naive implementation is projected to be nearly **28x slower**.
+With compiler optimizations, the ikj kernel completes **17.18 Billion FLOPs** in just **5.5 seconds**, achieving **~3.2 GFLOPS**. The naive implementation would take considerably longer due to cache thrashing — estimated **10-28x slower** depending on matrix size and CPU.
 
 | Kernel | 256x256 Time | 256x256 GFLOPS | Speedup |
 |--------|---------------|----------------|---------|
@@ -138,7 +138,7 @@ To run these benchmarks on your own machine, clone the repository and compile wi
 
 ```bash
 # Clone the repo
-git clone https://github.com/cheese-cakee/GEMM-Benchmarking.git
+git clone https://github.com/cheese-cakee/Benchmarking-GEMM.git
 cd GEMM-Benchmarking
 
 # Compile with GCC/Clang (Highly Recommended Flags)
