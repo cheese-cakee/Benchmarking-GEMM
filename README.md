@@ -95,18 +95,31 @@ Writing cache-friendly code is only half the battle. Unleashing the compiler pus
 
 ## Benchmark Results
 
-Our benchmarking framework validates the math on small matrices before running heavy loads.
+### 1. The 256x256 Benchmark (33.55 Million FLOPs)
 
-### Visual & Correctness Verification (4x4 & 64x64)
+**Before Optimization (Raw C++):**
 
-<img width="948" height="774" alt="image" src="https://github.com/user-attachments/assets/ea24465c-fce4-433d-8e23-8c4b74707add" />
-<img width="950" height="288" alt="image" src="https://github.com/user-attachments/assets/3cdc32d8-e789-4490-b0c1-6593c8518d54" />
+<img width="948" height="774" alt="image" src="https://github.com/user-attachments/assets/f6c3202d-f3f6-47ad-a9c0-939610f36dae" />
 
-### The Final Showdown (2048x2048 Full Size)
 
-<img width="958" height="776" alt="image" src="https://github.com/user-attachments/assets/3efec378-eb01-4728-b9fd-9631de916282" />
-<img width="945" height="289" alt="Screenshot 2026-04-05 180816" src="https://github.com/user-attachments/assets/15b85538-2375-473d-9dfb-3d8bbb567822" />
+**After Optimization (`-O3 -march=native -ffast-math`):**
 
+<img width="958" height="776" alt="image" src="https://github.com/user-attachments/assets/57bfb56e-191d-43eb-987f-a813ce9fc9d6" />
+
+
+---
+
+### 2. The 2048x2048 Benchmark (17.18 Billion FLOPs)
+
+**Before Optimization (Raw C++):**
+
+<img width="945" height="289" alt="Screenshot 2026-04-05 180816" src="https://github.com/user-attachments/assets/324bf490-e75a-42d8-9ecf-37f8150a180f" />
+
+
+
+**After Optimization (`-O3 -march=native -ffast-math`):**
+
+<img width="950" height="288" alt="image" src="https://github.com/user-attachments/assets/20a5eec4-4c3e-41bd-8da4-dc9a65a07b68" />
 
 
 With compiler optimizations, the ikj kernel completes **17.18 Billion FLOPs** in just **5.5 seconds**, achieving **~3.2 GFLOPS**. The naive implementation is projected to be nearly **28x slower**.
