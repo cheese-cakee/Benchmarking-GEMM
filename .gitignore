@@ -1,0 +1,8 @@
+# Binaries
+*.exe
+*.o
+*.obj
+
+# Build artifacts
+*.dll
+*.exe.stackdump
