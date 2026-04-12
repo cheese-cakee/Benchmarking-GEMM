@@ -6,6 +6,7 @@
 #include <numeric>
 #include <iomanip>
 #include <string>
+#include "perf_counters.hpp"
 
 constexpr int FULL_N = 2048;
 constexpr int VERIFY_N = 64;
@@ -20,8 +21,8 @@ void gemm_naive(const float* A, const float* B, float* C, int N) {
             float sum = 0;
             for (int k = 0; k < N; k++) {
                 sum += A[i * N + k] * B[k * N + j];
-                C[i * N + j] = sum;
             }
+            C[i * N + j] = sum;
         }
     }
 }
@@ -45,6 +46,24 @@ void gemm_ikj(const float* A, const float* B, float* C, int N) {
             float temp = A[i * N + k];
             for (int j = 0; j < N; j++) {
                 C[i * N + j] += temp * B[k * N + j];
+            }
+        }
+    }
+}
+
+void gemm_tiled(const float* A, const float* B, float* C, int N, int tile_size) {
+    for (int i = 0; i < N * N; i++) C[i] = 0;
+    for (int i = 0; i < N; i += tile_size) {
+        for (int k = 0; k < N; k += tile_size) {
+            for (int j = 0; j < N; j += tile_size) {
+                for (int ii = i; ii < (i + tile_size < N ? i + tile_size : N); ii++) {
+                    for (int kk = k; kk < (k + tile_size < N ? k + tile_size : N); kk++) {
+                        float temp = A[ii * N + kk];
+                        for (int jj = j; jj < (j + tile_size < N ? j + tile_size : N); jj++) {
+                            C[ii * N + jj] += temp * B[kk * N + jj];
+                        }
+                    }
+                }
             }
         }
     }
@@ -80,6 +99,17 @@ struct Stats { double median, min_val, max_val, stddev, gflops; };
 static Stats benchmark(void (*kernel)(const float*, const float*, float*, int),
                        const float* A, const float* B, float* C, int N,
                        const std::string& name, double total_flops) {
+    PerfCounters pc;
+    bool perf_available = false;
+    
+    pc.init();
+    if (pc.query) {
+        pc.add_counter("Elapsed Cycles", "\\Processor(_Total)\\Elapsed Cycles");
+        pc.add_counter("Cache Misses", "\\Memory\\Cache Lines evicted");
+        pc.start();
+        perf_available = true;
+    }
+
     for (int w = 0; w < WARMUP_RUNS; w++) {
         std::fill(C, C + N * N, 0.0f);
         kernel(A, B, C, N);
@@ -96,6 +126,14 @@ static Stats benchmark(void (*kernel)(const float*, const float*, float*, int),
         for (int i = 0; i < N * N; i++) sink += C[i];
     }
 
+    double cycles = 0, cache_misses = 0;
+    if (perf_available) {
+        pc.stop();
+        cycles = pc.get_value(0);
+        cache_misses = pc.get_value(1);
+        pc.cleanup();
+    }
+
     std::sort(times.begin(), times.end());
     double median = times[TIMED_RUNS / 2];
     double mean = std::accumulate(times.begin(), times.end(), 0.0) / TIMED_RUNS;
@@ -110,7 +148,12 @@ static Stats benchmark(void (*kernel)(const float*, const float*, float*, int),
               << std::setw(10) << times.front() << " ms  "
               << std::setw(10) << times.back() << " ms  "
               << std::setw(8) << stddev << "  "
-              << std::setprecision(1) << std::setw(8) << gflops << " GFLOPS\n";
+              << std::setprecision(1) << std::setw(8) << gflops << " GFLOPS";
+    if (perf_available && cycles > 0) {
+        std::cout << "  cycles: " << std::fixed << std::setprecision(0) << cycles
+                  << "  cache-misses: " << std::fixed << std::setprecision(0) << cache_misses;
+    }
+    std::cout << "\n";
 
     return {median, times.front(), times.back(), stddev, gflops};
 }
@@ -145,7 +188,10 @@ int main() {
         gemm_register(A.data(), B.data(), C.data(), N);
         std::cout << "Register optimized: " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_ikj(A.data(), B.data(), C.data(), N);
-        std::cout << "Loop reorder ikj:   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
+        std::cout << "Loop reorder ikj:   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::fill(C.begin(), C.end(), 0.0f);
+        gemm_tiled(A.data(), B.data(), C.data(), N, 64);
+        std::cout << "Tiled (64x64):   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
     }
 
     // --- 64x64 Correctness Check ---
@@ -162,7 +208,10 @@ int main() {
         gemm_register(A.data(), B.data(), C.data(), N);
         std::cout << "Register optimized: " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_ikj(A.data(), B.data(), C.data(), N);
-        std::cout << "Loop reorder ikj:   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
+        std::cout << "Loop reorder ikj:   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::fill(C.begin(), C.end(), 0.0f);
+        gemm_tiled(A.data(), B.data(), C.data(), N, 64);
+        std::cout << "Tiled (64x64):      " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
     }
 
     // --- 256x256 Benchmark (all kernels, fast) ---
@@ -182,13 +231,16 @@ int main() {
         std::vector<float> A(N*N), B(N*N), C(N*N);
         init_matrix(A, N); init_matrix(B, N);
 
+        auto tiled_64 = [](const float* a, const float* b, float* c, int n){ gemm_tiled(a, b, c, n, 64); };
         Stats s_naive = benchmark(gemm_naive, A.data(), B.data(), C.data(), N, "Naive ijk", total_flops);
         Stats s_reg   = benchmark(gemm_register, A.data(), B.data(), C.data(), N, "Register optimized", total_flops);
         Stats s_ikj   = benchmark(gemm_ikj, A.data(), B.data(), C.data(), N, "Loop reorder ikj", total_flops);
+        Stats s_tiled = benchmark(tiled_64, A.data(), B.data(), C.data(), N, "Tiled 64x64", total_flops);
 
         std::cout << "\n--- Speedups (vs Naive) ---\n";
         std::cout << "Register optimized: " << std::fixed << std::setprecision(2) << s_naive.median / s_reg.median << "x\n";
         std::cout << "Loop reorder ikj:   " << std::fixed << std::setprecision(2) << s_naive.median / s_ikj.median << "x\n";
+        std::cout << "Tiled 64x64:        " << std::fixed << std::setprecision(2) << s_naive.median / s_tiled.median << "x\n";
     }
 
     // --- 2048x2048 Benchmark (ikj only, projected others) ---
@@ -209,12 +261,19 @@ int main() {
         std::vector<float> A(N*N), B(N*N), C(N*N);
         init_matrix(A, N); init_matrix(B, N);
 
+        auto tiled_64 = [](const float* a, const float* b, float* c, int n){ gemm_tiled(a, b, c, n, 64); };
         Stats s_ikj = benchmark(gemm_ikj, A.data(), B.data(), C.data(), N, "Loop reorder ikj", total_flops);
+        double tiled_time = time_single(tiled_64, A.data(), B.data(), C.data(), N);
 
         // Project naive and register from 256x256 ratios
         std::cout << "\n--- Projected speedups (from 256x256 ratios) ---\n";
         std::cout << "Naive (projected ~35 min)       vs ikj: " << std::fixed << std::setprecision(1)
                   << (35000.0 / s_ikj.median) << "x\n";
+        double tiled_gflops = total_flops / (tiled_time / 1000.0) / 1e9;
+        std::cout << "Tiled 64x64 actual: " << std::fixed << std::setprecision(1)
+                  << tiled_time << " ms  " << tiled_gflops << " GFLOPS\n";
+        std::cout << "Tiled vs ikj speedup: " << std::fixed << std::setprecision(2)
+                  << s_ikj.median / tiled_time << "x\n";
     }
 
     return 0;
