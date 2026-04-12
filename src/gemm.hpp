@@ -4,5 +4,6 @@
 void gemm_naive(const float* A, const float* B, float* C, int N);
 void gemm_register(const float* A, const float* B, float* C, int N);
 void gemm_ikj(const float* A, const float* B, float* C, int N);
+void gemm_tiled(const float* A, const float* B, float* C, int N, int tile_size);
 
 #endif
