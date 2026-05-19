@@ -6,6 +6,7 @@
 #include <numeric>
 #include <iomanip>
 #include <string>
+//#define NOMINMAX
 #include "perf_counters.hpp"
 
 constexpr int FULL_N = 2048;
