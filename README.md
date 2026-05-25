@@ -129,6 +129,7 @@ Writing cache-friendly code is only half the battle. Unleashing the compiler pus
 | Register optimized | 7.6 ms | 4.4 | 1.08x |
 | **Loop reorder (ikj)** | **0.8 ms** | **40.2** | **9.77x** |
 | Tiled 64x64 | 1.3 ms | 26.5 | 6.43x |
+| **AVX2 ikj** | **0.8 ms** | **40.5** | **10.03x** |
 
 > **Note:** The gap between Naive and Register is small here because `-O3` auto-optimizes the repeated memory write. The true penalty of the naive approach appears at large sizes where write-through saturates memory bandwidth (hence omitted at 2048×2048).
 
