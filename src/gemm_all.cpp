@@ -6,6 +6,7 @@
 #include <numeric>
 #include <iomanip>
 #include <string>
+#include<immintrin.h>
 //#define NOMINMAX
 #include "perf_counters.hpp"
 
@@ -53,7 +54,8 @@ void gemm_ikj(const float* A, const float* B, float* C, int N) {
 }
 
 
-void gemm_tiled(const float* A, const float* B, float* C, int N, int tile_size) {
+void gemm_tiled(const float* A, const float* B, float* C, int N, int tile_size)
+{
     for (int i = 0; i < N * N; i++) C[i] = 0;
     for (int i = 0; i < N; i += tile_size) {
         int i_end = std::min(i+tile_size,N);
@@ -69,6 +71,29 @@ void gemm_tiled(const float* A, const float* B, float* C, int N, int tile_size) 
                         }
                     }
                 }
+            }
+        }
+}
+}
+
+
+void gemm_avx2(const float* A, const float* B, float* C, int N)
+{
+    for(int i =0;i<N * N;i++)C[i] = 0;
+    for(int i =0;i<N;i++){
+        for(int k = 0;k<N;k++){
+            __m256 a_vec = _mm256_broadcast_ss(&A[i * N + k]);
+            int j =0;
+            for(;j+8 <= N; j += 8)
+            {
+                __m256 b_vec = _mm256_loadu_ps(&B[k * N + j]);
+                __m256 c_vec = _mm256_loadu_ps(&C[i * N + j]);
+                c_vec = _mm256_fmadd_ps(a_vec, b_vec, c_vec);
+                _mm256_storeu_ps(&C[i * N + j], c_vec);
+
+            }
+            for(;j<N;j++){
+                C[i * N + j] += A[i * N + k]*B[k * N + j];
             }
         }
     }
@@ -196,7 +221,10 @@ int main() {
         std::cout << "Loop reorder ikj:   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_tiled(A.data(), B.data(), C.data(), N, 64);
-        std::cout << "Tiled (64x64):   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
+        std::cout << "Tiled (64x64):   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::fill(C.begin(), C.end(), 0.0f);
+        gemm_avx2(A.data(), B.data(), C.data(), N);
+        std::cout << "AVX2 (64x64):   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
     }
 
     // --- 64x64 Correctness Check ---
@@ -216,7 +244,10 @@ int main() {
         std::cout << "Loop reorder ikj:   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_tiled(A.data(), B.data(), C.data(), N, 64);
-        std::cout << "Tiled (64x64):      " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
+        std::cout << "Tiled (64x64):      " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::fill(C.begin(), C.end(), 0.0f);
+        gemm_avx2(A.data(), B.data(), C.data(), N);
+        std::cout << "AVX2 (64x64):      " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
     }
 
     // --- 256x256 Benchmark (all kernels, fast) ---
@@ -241,11 +272,13 @@ int main() {
         Stats s_reg   = benchmark(gemm_register, A.data(), B.data(), C.data(), N, "Register optimized", total_flops);
         Stats s_ikj   = benchmark(gemm_ikj, A.data(), B.data(), C.data(), N, "Loop reorder ikj", total_flops);
         Stats s_tiled = benchmark(tiled_64, A.data(), B.data(), C.data(), N, "Tiled 64x64", total_flops);
+        Stats s_avx2 = benchmark(gemm_avx2,A.data(),B.data(), C.data(), N, "AVX2 ikj", total_flops);
 
         std::cout << "\n--- Speedups (vs Naive) ---\n";
         std::cout << "Register optimized: " << std::fixed << std::setprecision(2) << s_naive.median / s_reg.median << "x\n";
         std::cout << "Loop reorder ikj:   " << std::fixed << std::setprecision(2) << s_naive.median / s_ikj.median << "x\n";
         std::cout << "Tiled 64x64:        " << std::fixed << std::setprecision(2) << s_naive.median / s_tiled.median << "x\n";
+        std::cout << "AVX2:               " << std::fixed << std::setprecision(2) << s_naive.median / s_avx2.median << "x\n";
     }
 
     // --- 2048x2048 Benchmark (ikj only, projected others) ---
@@ -269,6 +302,7 @@ int main() {
         auto tiled_64 = [](const float* a, const float* b, float* c, int n){ gemm_tiled(a, b, c, n, 64); };
         Stats s_ikj = benchmark(gemm_ikj, A.data(), B.data(), C.data(), N, "Loop reorder ikj", total_flops);
         double tiled_time = time_single(tiled_64, A.data(), B.data(), C.data(), N);
+        Stats s_avx2 = benchmark(gemm_avx2, A.data(), B.data(), C.data(), N, "AVX2 ikj", total_flops);
 
         // Project naive and register from 256x256 ratios
         std::cout << "\n--- Projected speedups (from 256x256 ratios) ---\n";
