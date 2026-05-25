@@ -140,6 +140,7 @@ Writing cache-friendly code is only half the battle. Unleashing the compiler pus
 | Kernel | Median Time | GFLOPS | Notes |
 |--------|-------------|--------|-------|
 | **Loop reorder (ikj)** | **817.0 ms** | **21.0** | Baseline for large matrices |
+| **AVX2 ikj** | **920.2 ms** | **18.7** | No gain — memory bandwidth bottleneck, same access pattern as ikj |
 | **Tiled 64x64** | **549.6 ms** | **31.3** | **1.49× faster than ikj** |
 
 > **Why does tiled win at 2048×2048 but lose at 256×256?** At 2048×2048 the working set (~48MB) exceeds L3 cache. Tiling keeps active data in L1/L2, whereas `ikj` streams through the entire matrix set repeatedly. Tiling is not universally better — it is a **size-dependent optimization**.
