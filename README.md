@@ -40,13 +40,13 @@ for (int i = 0; i < N; i++) {
         float sum = 0;
         for (int k = 0; k < N; k++) {
             sum += A[i * N + k] * B[k * N + j];
-            C[i * N + j] = sum; 
+            C[i * N + j] = sum; // Writes to RAM every inner iteration!
         }
     }
 }
 ```
 
-**The Flaw:** We constantly write to memory (`C[i * N + j]`) inside the innermost loop. Writing to RAM is incredibly slow — this is **~4.4 GFLOPS** on this CPU.
+**The Flaw:** We constantly write to memory (`C[i * N + j]`) inside the innermost loop. Writing to RAM is incredibly slow. On large matrices this collapses performance due to write-through traffic saturating memory bandwidth.
 
 ### 2. Register Optimization
 
@@ -64,7 +64,7 @@ for (int i = 0; i < N; i++) {
 }
 ```
 
-**The Flaw:** We are still thrashing the CPU cache. In C++, matrices are stored in row-major order. Accessing `B[k * N + j]` inside the k loop forces the CPU to jump forward in memory by N elements every iteration, missing the cache entirely.
+**The Flaw:** We are still thrashing the CPU cache. In C++, matrices are stored in row-major order. Accessing `B[k * N + j]` inside the k loop forces the CPU to jump forward in memory by N elements every iteration, missing the cache entirely. At small sizes the compiler may auto-correct the naive version, but on large matrices the write-through penalty is severe.
 
 ### 3. Loop Reordering (ikj Loop) - The Cache Magic
 
@@ -118,39 +118,57 @@ Writing cache-friendly code is only half the battle. Unleashing the compiler pus
 
 ## Benchmark Results
 
+*Run on Intel i5-13450HX, Windows 11, MinGW-w64 GCC 14.2.0*  
+*Compile flags: `-O3 -march=native -ffast-math -static -lpdh`*
+
 ### 256x256 Matrix (33.55 Million FLOPs)
 
 | Kernel | Median Time | GFLOPS | Speedup vs Naive |
 |--------|-------------|--------|-----------------|
-| Naive ijk | ~12.0 ms | ~2.8 | 1.00x |
-| Register optimized | ~11.0 ms | ~3.0 | 1.05x |
-| **Loop reorder (ikj)** | **~1.3 ms** | **~25.7** | **~8.91x** |
-| **Tiled 64x64** | **~1.8 ms** | **~18.4** | **~6.58x** |
+| Naive ijk | 8.2 ms | 4.1 | 1.00x |
+| Register optimized | 7.6 ms | 4.4 | 1.08x |
+| **Loop reorder (ikj)** | **0.8 ms** | **40.2** | **9.77x** |
+| Tiled 64x64 | 1.3 ms | 26.5 | 6.43x |
 
-> **Why is tiled slower than ikj here?** At 256×256, total matrix size is ~768KB — the full working set fits in L2 cache. Tiling adds loop overhead with no cache benefit. The 64×64 tile size (16KB) is also at the edge of L1 capacity (48KB on i5-13450HX), causing thrashing when processing three tiles simultaneously. Tile size tuning is architecture-dependent.
+> **Note:** The gap between Naive and Register is small here because `-O3` auto-optimizes the repeated memory write. The true penalty of the naive approach appears at large sizes where write-through saturates memory bandwidth (hence omitted at 2048×2048).
 
-> **2048×2048 results omitted** — naive and register variants would take ~35+ minutes each. Both ikj and tiled scale similarly to the 256×256 case.
+> **Why is tiled slower than ikj here?** At 256×256, total matrix size is ~768KB — the full working set fits in L2 cache. Tiling adds loop overhead with no cache benefit. The 64×64 tile size is also at the edge of L1 capacity (48KB on i5-13450HX), causing thrashing when processing three tiles simultaneously.
+
+### 2048x2048 Matrix (17.18 Billion FLOPs)
+
+| Kernel | Median Time | GFLOPS | Notes |
+|--------|-------------|--------|-------|
+| **Loop reorder (ikj)** | **817.0 ms** | **21.0** | Baseline for large matrices |
+| **Tiled 64x64** | **549.6 ms** | **31.3** | **1.49× faster than ikj** |
+
+> **Why does tiled win at 2048×2048 but lose at 256×256?** At 2048×2048 the working set (~48MB) exceeds L3 cache. Tiling keeps active data in L1/L2, whereas `ikj` streams through the entire matrix set repeatedly. Tiling is not universally better — it is a **size-dependent optimization**.
 
 ### Key Results
 
-- **ikj loop reorder**: ~8.91x speedup over naive — achieves 25.7 GFLOPS
-- **Tiled 64x64**: ~6.58x speedup — achieves 18.4 GFLOPS
-- The key insight: **memory access patterns matter more than raw algorithmic complexity** when data doesn't fit in cache.
+- **ikj loop reorder**: ~9.8x speedup over naive at 256×256 — achieves 40.2 GFLOPS
+- **Tiling**: Slightly slower than `ikj` at 256×256 (26.5 GFLOPS), but **1.49× faster** at 2048×2048 (31.3 GFLOPS)
+- The key insight: **there is no single best algorithm — optimization is context-dependent. Cache-friendly access matters, but so does matching tile size to your memory hierarchy.**
 
 ---
 
 ## Technical Details
 
 - **Language**: C++17
-- **Compiler**: GCC (MinGW-w64)
-- **Flags**: `-O3 -march=native -ffast-math -static`
-- **Platform**: Windows (MSYS2)
-- **CPU**: Intel i5-13450HX (10 cores, 2.4 GHz base)
-- **Matrix sizes tested**: 4x4, 64x64, 256x256
+- **Compiler**: GCC (MinGW-w64) 14.2.0
+- **Compile flags**: `-O3 -march=native -ffast-math -static`
+- **Link flags**: `-lpdh` (required for Windows performance counters)
+- **Build command**: `g++ -std=c++17 -Wall -Wextra -O3 -march=native -ffast-math -static -o gemm_bench.exe src/gemm_all.cpp -lpdh`
+- **Platform**: Windows 11
+- **CPU**: Intel i5-13450HX (10 cores, 2.4 GHz base, 48KB L1d, 1.25MB L2, 20MB L3)
+- **Matrix sizes tested**: 4×4, 64×64, 256×256, 2048×2048
 
 ### Theoretical Context
 
-For reference, OpenBLAS on the same hardware achieves ~180 GFLOPS on this operation. Our best result (25.7 GFLOPS single-threaded) represents a fraction of peak — the remaining gap comes from hand-vectorized AVX2 kernels, multi-threading, and prefetching strategies that mature BLAS libraries employ.
+For reference, OpenBLAS on the same hardware achieves ~180 GFLOPS on this operation. Our current best result (40.2 GFLOPS single-threaded at 256×256, 31.3 GFLOPS at 2048×2048) represents a fraction of peak. The remaining gap comes from:
+- **SIMD vectorization** (AVX2/AVX-512) — next step in this project
+- **Multi-threading** — utilizing all 10 cores
+- **Prefetching** — hiding memory latency
+- **Micro-kernel architecture** — register-blocking like BLIS/OpenBLAS
 
 ---
 
