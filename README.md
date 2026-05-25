@@ -149,6 +149,7 @@ Writing cache-friendly code is only half the battle. Unleashing the compiler pus
 
 - **ikj loop reorder**: ~9.8x speedup over naive at 256×256 — achieves 40.2 GFLOPS
 - **Tiling**: Slightly slower than `ikj` at 256×256 (26.5 GFLOPS), but **1.49× faster** at 2048×2048 (31.3 GFLOPS)
+- **AVX2**: Same speed as `ikj` at 256×256 (40.5 vs 40.2 GFLOPS) because the compiler already auto-vectorized the same loop. Slower at 2048×2048 (18.7 vs 19.6 GFLOPS) — **naive SIMD without register-blocking is useless when memory-bound**
 - The key insight: **there is no single best algorithm — optimization is context-dependent. Cache-friendly access matters, but so does matching tile size to your memory hierarchy.**
 
 ---
