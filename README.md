@@ -114,6 +114,54 @@ Writing cache-friendly code is only half the battle. Unleashing the compiler pus
 - `-ffast-math`: Enables faster (though sometimes less precise) mathematical operations
 - `-static`: Required on Windows to avoid DLL issues
 
+### 6. Register-Blocked Micro-Kernel (4×8)
+
+The ikj and tiled kernels still load C from memory on every k-iteration. A register-blocked kernel keeps C accumulators in YMM registers across the entire k-loop:
+
+```cpp
+for (int i = 0; i < N; i += 4) {
+    for (int j = 0; j < N; j += 8) {
+        __m256 acc0..3 = 0;         // in registers
+        for (int k = 0; k < N; k++) {
+            __m256 b = load(B[k][j..j+7]);      // loaded once
+            acc0 += broadcast(A[i][k]) * b;     // reused across 4 rows
+            acc1 += broadcast(A[i+1][k]) * b;
+            acc2 += broadcast(A[i+2][k]) * b;
+            acc3 += broadcast(A[i+3][k]) * b;
+        }
+        store acc0..3 to C;                     // written once
+    }
+}
+```
+
+**The win:** B is loaded once per 4 rows (4× reuse). C is never loaded/stored inside k-loop (2048× reduction in C traffic). At 256×256 this reaches **72.5 GFLOPS**.
+
+**The flaw:** A and B are accessed with N-stride (2048-element gap). At 2048×2048 performance collapses to 15.0 GFLOPS — every access misses cache. The next step fixes this.
+
+### 7. Packing — Feeding the Micro-Kernel
+
+Copy tiles of A and B into contiguous buffers so every load inside the micro-kernel is sequential:
+
+```cpp
+// Pack A: mc rows × kc cols, stored as [kk * mc + ii]
+void pack_A(const float* A, float* packed, int N,
+            int i_start, int k_start, int mc, int kc) {
+    for (int kk = 0; kk < kc; kk++)
+        for (int ii = 0; ii < mc; ii++)
+            packed[kk * mc + ii] = A[(i_start+ii)*N + (k_start+kk)];
+}
+
+// Pack B: kc rows × nr cols, stored as [kk * nr + jj]
+void pack_B(const float* B, float* packed, int N,
+            int k_start, int j_start, int kc, int nr) {
+    for (int kk = 0; kk < kc; kk++)
+        for (int jj = 0; jj < nr; jj++)
+            packed[kk * nr + jj] = B[(k_start+kk)*N + (j_start+jj)];
+}
+```
+
+The packed micro-kernel reads from these buffers with offset `kk * stride` — every access is a cache line hit. Combined with 4×8 register blocking, this achieves **69.2 GFLOPS** at 2048×2048, a 2.3× improvement over plain tiling.
+
 ---
 
 ## Benchmark Results
@@ -125,32 +173,36 @@ Writing cache-friendly code is only half the battle. Unleashing the compiler pus
 
 | Kernel | Median Time | GFLOPS | Speedup vs Naive |
 |--------|-------------|--------|-----------------|
-| Naive ijk | 8.2 ms | 4.1 | 1.00x |
-| Register optimized | 7.6 ms | 4.4 | 1.08x |
-| **Loop reorder (ikj)** | **0.8 ms** | **40.2** | **9.77x** |
-| Tiled 64x64 | 1.3 ms | 26.5 | 6.43x |
-| **AVX2 ikj** | **0.8 ms** | **40.5** | **10.03x** |
+| Naive ijk | 8.4 ms | 4.0 | 1.00x |
+| Register optimized | 7.7 ms | 4.3 | 1.09x |
+| Loop reorder (ikj) | 0.6 ms | 58.3 | 14.56x |
+| Tiled 64x64 | 0.9 ms | 35.5 | 8.87x |
+| AVX2 ikj | 0.6 ms | 55.0 | 13.74x |
+| 4X8 Microkernel | 0.5 ms | 72.5 | 18.11x |
+| **4X8 Packed** | **0.5 ms** | **68.0** | **16.98x** |
 
-> **Note:** The gap between Naive and Register is small here because `-O3` auto-optimizes the repeated memory write. The true penalty of the naive approach appears at large sizes where write-through saturates memory bandwidth (hence omitted at 2048×2048).
-
-> **Why is tiled slower than ikj here?** At 256×256, total matrix size is ~768KB — the full working set fits in L2 cache. Tiling adds loop overhead with no cache benefit. The 64×64 tile size is also at the edge of L1 capacity (48KB on i5-13450HX), causing thrashing when processing three tiles simultaneously.
+> **Note:** At 256×256 the entire working set (~768KB) fits in L2 cache, so all competitive kernels cluster near peak bandwidth. The 4x8 microkernel leads slightly because C stays in registers across k.
 
 ### 2048x2048 Matrix (17.18 Billion FLOPs)
 
 | Kernel | Median Time | GFLOPS | Notes |
 |--------|-------------|--------|-------|
-| **Loop reorder (ikj)** | **817.0 ms** | **21.0** | Baseline for large matrices |
-| AVX2 ikj | 920.2 ms | 18.7 | No gain — memory bandwidth bottleneck, same access pattern as ikj |
-| **Tiled 64x64** | **549.6 ms** | **31.3** | **1.49× faster than ikj** |
+| Loop reorder (ikj) | 938.0 ms | 18.3 | Baseline — sequential access, no reuse |
+| AVX2 ikj | 854.0 ms | 20.1 | Slightly faster; same memory-bottleneck pattern |
+| 4X8 Microkernel (unpacked) | 1146.4 ms | 15.0 | Slower — A/B stride across N=2048 destroys cache |
+| Tiled 64x64 | 559.6 ms | 30.7 | 1.68× faster than ikj — tile fits in L1 |
+| **4X8 Packed** | **248.4 ms** | **69.2** | **2.3× faster than tiled — packing + micro-kernel** |
 
-> **Why does tiled win at 2048×2048 but lose at 256×256?** At 2048×2048 the working set (~48MB) exceeds L3 cache. Tiling keeps active data in L1/L2, whereas `ikj` streams through the entire matrix set repeatedly. Tiling is not universally better — it is a **size-dependent optimization**.
+> **Why does packing help?** Without packing, the 4x8 kernel loads A and B with N-stride (2048-element gaps) — every access is a cache miss. Packing copies tiles into contiguous buffers where every load hits L1. Combined with C living in registers, the packed micro-kernel keeps the FMA units fed.
 
 ### Key Results
 
-- **ikj loop reorder**: ~9.8x speedup over naive at 256×256 — achieves 40.2 GFLOPS
-- **Tiling**: Slightly slower than `ikj` at 256×256 (26.5 GFLOPS), but **1.49× faster** at 2048×2048 (31.3 GFLOPS)
-- **AVX2**: Same speed as `ikj` at 256×256 (40.5 vs 40.2 GFLOPS) because the compiler already auto-vectorized the same loop. Slower at 2048×2048 (18.7 vs 19.6 GFLOPS) — **naive SIMD without register-blocking is useless when memory-bound**
-- The key insight: **there is no single best algorithm — optimization is context-dependent. Cache-friendly access matters, but so does matching tile size to your memory hierarchy.**
+- **ikj loop reorder**: 14.56× speedup over naive — the simplest cache-friendly change
+- **Tiled (64×64)**: 1.68× faster than ikj at 2048×2048 — tile fits in L1 cache
+- **4X8 register-blocked microkernel**: 72.5 GFLOPS at 256×256 (best small-matrix result) but **fails at 2048×2048** (15.0 GFLOPS, worse than ikj) due to strided memory access
+- **4X8 Packed**: **69.2 GFLOPS at 2048×2048** — 2.3× faster than tiled, 3.8× faster than plain ikj. Packing eliminates the memory stride bottleneck that limited the standalone micro-kernel
+- The key insight: **a register-blocked micro-kernel is only as good as its data supply. Without packing, the memory system starves the ALU.**
+- **Current gap to OpenBLAS (~180 GFLOPS)**: 69.2 GFLOPS single-threaded is ~38% of our i5-13450HX theoretical AVX2 peak (~112 GFLOPS at 3.5 GHz). Moving to 10 threads should close most of the gap.
 
 ---
 
@@ -167,11 +219,10 @@ Writing cache-friendly code is only half the battle. Unleashing the compiler pus
 
 ### Theoretical Context
 
-For reference, OpenBLAS on the same hardware achieves ~180 GFLOPS on this operation. Our current best result (40.2 GFLOPS single-threaded at 256×256, 31.3 GFLOPS at 2048×2048) represents a fraction of peak. The remaining gap comes from:
-- **SIMD vectorization** (AVX2/AVX-512) — next step in this project
-- **Multi-threading** — utilizing all 10 cores
-- **Prefetching** — hiding memory latency
-- **Micro-kernel architecture** — register-blocking like BLIS/OpenBLAS
+For reference, OpenBLAS on the same hardware achieves ~180 GFLOPS on this operation. Our current best result (72.5 GFLOPS single-threaded at 256×256, 69.2 GFLOPS at 2048×2048 with packing) represents solid single-core utilization. The remaining gap comes from:
+- **Multi-threading** — utilizing all 10 cores via OpenMP (~10× multiplier)
+- **Prefetching** — hiding L1/L2 memory latency inside the micro-kernel
+- **Tuning** — larger register blocks (6×8, 8×8), optimal tile sizes, AVX-512 (if available)
 
 ---
 

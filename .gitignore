@@ -6,3 +6,6 @@ out/
 # Build artifacts
 *.dll
 *.exe.stackdump
+results.txt
+
+*.full
