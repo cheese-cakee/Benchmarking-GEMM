@@ -99,6 +99,71 @@ void gemm_avx2(const float* A, const float* B, float* C, int N)
     }
 }
 
+void gemm_blocked_4x8(const float* A, const float* B, float* C,int N)
+{
+    for(int i =0;i<N*N;i++)C[i] = 0;
+
+    int i =0;
+    for(; i + 4 <= N;i += 4)
+    {
+        int j =0;
+        for(;j +8 <= N; j+= 8)
+        {
+            __m256 acc0 = _mm256_setzero_ps();
+            __m256 acc1 = _mm256_setzero_ps();
+            __m256 acc2 = _mm256_setzero_ps();
+            __m256 acc3 = _mm256_setzero_ps();
+
+            for(int k =0; k < N; k++)
+            {
+                __m256 b = _mm256_loadu_ps(&B[k * N + j]);
+
+
+                __m256 a0 = _mm256_broadcast_ss(&A[(i+0)*N + k ]);
+                acc0 = _mm256_fmadd_ps(a0,b,acc0);
+                __m256 a1 = _mm256_broadcast_ss(&A[(i+1)*N + k ]);
+                acc1 = _mm256_fmadd_ps(a1,b,acc1);
+                __m256 a2 = _mm256_broadcast_ss(&A[(i+2)*N + k ]);
+                acc2 = _mm256_fmadd_ps(a2,b,acc2);
+                __m256 a3 = _mm256_broadcast_ss(&A[(i+3)*N + k ]);
+                acc3 = _mm256_fmadd_ps(a3,b,acc3);
+            }
+
+            _mm256_storeu_ps(&C[(i+0)*N + j], acc0);
+            _mm256_storeu_ps(&C[(i+1)*N + j], acc1);
+            _mm256_storeu_ps(&C[(i+2)*N + j], acc2);
+            _mm256_storeu_ps(&C[(i+3)*N + j], acc3);
+        }
+
+        if(j<N){
+            for(int k = 0;k<N;k++){
+                float a0 = A[(i+0)*N + k];
+                float a1 = A[(i+1)*N + k];
+                float a2 = A[(i+2)*N + k];
+                float a3 = A[(i+3)*N + k];
+                for(int jj = j;jj < N;jj++){
+                    float bval = B[k*N + jj];
+                    C[(i+0)*N+jj] += a0 * bval;
+                    C[(i+1)*N+jj] += a1 * bval;
+                    C[(i+2)*N+jj] += a2 * bval;
+                    C[(i+3)*N+jj] += a3 * bval;
+                }
+            }
+        }
+    }
+
+    for(; i< N;i++)
+    {
+        for(int k =0;k<N;k++)
+        {
+            float a = A[i*N + k];
+            for( int j =0;j<N;j++){
+                C[i * N + j] += a * B[k * N + j];
+            }
+        }
+    }
+}
+
 static void init_matrix(std::vector<float>& mat, int N) {
     for (int i = 0; i < N * N; i++) mat[i] = static_cast<float>((i % 17) * 0.1f);
 }
@@ -224,7 +289,10 @@ int main() {
         std::cout << "Tiled (64x64):   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_avx2(A.data(), B.data(), C.data(), N);
-        std::cout << "AVX2 (64x64):   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
+        std::cout << "AVX2 (64x64):   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::fill(C.begin(), C.end(), 0.0f);
+        gemm_blocked_4x8(A.data(), B.data(), C.data(), N);
+        std::cout << "4X8 Microkernel: " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
     }
 
     // --- 64x64 Correctness Check ---
@@ -247,7 +315,9 @@ int main() {
         std::cout << "Tiled (64x64):      " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_avx2(A.data(), B.data(), C.data(), N);
-        std::cout << "AVX2 (64x64):      " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
+        std::cout << "AVX2 (64x64):      " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        gemm_blocked_4x8(A.data(), B.data(), C.data(), N);
+        std::cout << "4X8 Microkernel:   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
     }
 
     // --- 256x256 Benchmark (all kernels, fast) ---
@@ -273,12 +343,14 @@ int main() {
         Stats s_ikj   = benchmark(gemm_ikj, A.data(), B.data(), C.data(), N, "Loop reorder ikj", total_flops);
         Stats s_tiled = benchmark(tiled_64, A.data(), B.data(), C.data(), N, "Tiled 64x64", total_flops);
         Stats s_avx2 = benchmark(gemm_avx2,A.data(),B.data(), C.data(), N, "AVX2 ikj", total_flops);
+        Stats s_blocked = benchmark(gemm_blocked_4x8, A.data(), B.data(), C.data(), N, "4X8 Microkernel", total_flops);
 
         std::cout << "\n--- Speedups (vs Naive) ---\n";
         std::cout << "Register optimized: " << std::fixed << std::setprecision(2) << s_naive.median / s_reg.median << "x\n";
         std::cout << "Loop reorder ikj:   " << std::fixed << std::setprecision(2) << s_naive.median / s_ikj.median << "x\n";
         std::cout << "Tiled 64x64:        " << std::fixed << std::setprecision(2) << s_naive.median / s_tiled.median << "x\n";
         std::cout << "AVX2:               " << std::fixed << std::setprecision(2) << s_naive.median / s_avx2.median << "x\n";
+        std::cout << "4X8 Microkernel:    " << std::fixed << std::setprecision(2) << s_naive.median / s_blocked.median << "x\n";
     }
 
     // --- 2048x2048 Benchmark (ikj only, projected others) ---
@@ -303,6 +375,7 @@ int main() {
         Stats s_ikj = benchmark(gemm_ikj, A.data(), B.data(), C.data(), N, "Loop reorder ikj", total_flops);
         double tiled_time = time_single(tiled_64, A.data(), B.data(), C.data(), N);
         Stats s_avx2 = benchmark(gemm_avx2, A.data(), B.data(), C.data(), N, "AVX2 ikj", total_flops);
+        Stats s_blocked = benchmark(gemm_blocked_4x8, A.data(), B.data(), C.data(), N, "4X8 Microkernel", total_flops);
 
         // Project naive and register from 256x256 ratios
         std::cout << "\n--- Projected speedups (from 256x256 ratios) ---\n";
