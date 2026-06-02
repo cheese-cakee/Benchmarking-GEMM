@@ -247,6 +247,15 @@ void gemm_blocked_4x8_packed(const float* A, const float* B, float* C, int N)
                             kc, mc_main
                         );
                     }
+
+                    for (int r = mc_main; r < mc; r++) {
+                        for (int kk = 0; kk < kc; kk++) {
+                            float a_val = A[(i0 + r) * N + (k0 + kk)];
+                            for (int c = 0; c < nr; c++) {
+                                C[(i0 + r) * N + (j0 + jj + c)] += a_val * B[(k0 + kk) * N + (j0 + jj + c)];
+                            }
+                        }
+                    }
                 }
 
             }
