@@ -162,26 +162,44 @@ void pack_B(const float* B, float* packed, int N,
 
 The packed micro-kernel reads from these buffers with offset `kk * stride` — every access is a cache line hit. Combined with 4×8 register blocking, this achieves **69.2 GFLOPS** at 2048×2048, a 2.3× improvement over plain tiling.
 
+### 8. Prefetching — When It Hurts
+
+With the packed micro-kernel hitting ~69 GFLOPS, the natural next step is to hide memory latency with software prefetch:
+
+```cpp
+_mm_prefetch((const char*)&B_packed[(kk + 2) * 8], _MM_HINT_NTA);
+_mm_prefetch((const char*)&A_packed[(kk + 2) * mc], _MM_HINT_NTA);
+```
+
+We added prefetch with distance D=2 and `_MM_HINT_NTA` (non-temporal access hint) to both A_packed and B_packed inside the micro-kernel loop. The result: **performance dropped from 69 to 57 GFLOPS**.
+
+**Why?** The packed tile buffers are small — B_packed is 64×8 = 2KB, A_packed is 64×64 = 16KB. Both fit entirely in L1 cache. The hardware prefetcher already detects the sequential access pattern and brings in the next cache line before the CPU needs it. Adding explicit prefetch:
+1. Adds extra µops to the tight inner loop, competing for front-end bandwidth
+2. `_MM_HINT_NTA` may bypass L2/L3 entirely, forcing loads from DRAM — counterproductive for data that fits in L1
+
+**The lesson:** Software prefetch is not a magic wand. When data already fits in L1 and access is sequential, the hardware prefetcher is faster. Prefetch helps when data is in L2/L3 or access is irregular — not when you're already streaming from L1.
+
 ---
 
 ## Benchmark Results
 
 *Run on Intel i5-13450HX, Windows 11, MinGW-w64 GCC 14.2.0*  
-*Compile flags: `-O3 -march=native -ffast-math -static -lpdh`*
+*Compile flags: `-O3 -march=native -ffast-math -static`*
 
 ### 256x256 Matrix (33.55 Million FLOPs)
 
 | Kernel | Median Time | GFLOPS | Speedup vs Naive |
 |--------|-------------|--------|-----------------|
-| Naive ijk | 8.4 ms | 4.0 | 1.00x |
-| Register optimized | 7.7 ms | 4.3 | 1.09x |
+| Naive ijk | 8.3 ms | 4.0 | 1.00x |
+| Register optimized | 7.6 ms | 4.4 | 1.10x |
 | Loop reorder (ikj) | 0.6 ms | 58.3 | 14.56x |
 | Tiled 64x64 | 0.9 ms | 35.5 | 8.87x |
 | AVX2 ikj | 0.6 ms | 55.0 | 13.74x |
-| 4X8 Microkernel | 0.5 ms | 72.5 | 18.11x |
-| **4X8 Packed** | **0.5 ms** | **68.0** | **16.98x** |
+| 4X8 Microkernel | 0.5 ms | 74.4 | 18.61x |
+| **4X8 Packed** | **0.5 ms** | **71.6** | **17.77x** |
+| 4X8+Prefetch | 0.5 ms | 63.6 | 15.78x |
 
-> **Note:** At 256×256 the entire working set (~768KB) fits in L2 cache, so all competitive kernels cluster near peak bandwidth. The 4x8 microkernel leads slightly because C stays in registers across k.
+> **Note:** At 256×256 the entire working set (~768KB) fits in L2 cache, so all competitive kernels cluster near peak bandwidth. Prefetch hurts even here — the packed buffers already live in L1.
 
 ### 2048x2048 Matrix (17.18 Billion FLOPs)
 
@@ -192,6 +210,7 @@ The packed micro-kernel reads from these buffers with offset `kk * stride` — e
 | 4X8 Microkernel (unpacked) | 1146.4 ms | 15.0 | Slower — A/B stride across N=2048 destroys cache |
 | Tiled 64x64 | 559.6 ms | 30.7 | 1.68× faster than ikj — tile fits in L1 |
 | **4X8 Packed** | **248.4 ms** | **69.2** | **2.3× faster than tiled — packing + micro-kernel** |
+| 4X8+Prefetch | 285.3 ms | 60.2 | Prefetch made it worse — µops bloat the tight loop |
 
 > **Why does packing help?** Without packing, the 4x8 kernel loads A and B with N-stride (2048-element gaps) — every access is a cache miss. Packing copies tiles into contiguous buffers where every load hits L1. Combined with C living in registers, the packed micro-kernel keeps the FMA units fed.
 
@@ -199,10 +218,11 @@ The packed micro-kernel reads from these buffers with offset `kk * stride` — e
 
 - **ikj loop reorder**: 14.56× speedup over naive — the simplest cache-friendly change
 - **Tiled (64×64)**: 1.68× faster than ikj at 2048×2048 — tile fits in L1 cache
-- **4X8 register-blocked microkernel**: 72.5 GFLOPS at 256×256 (best small-matrix result) but **fails at 2048×2048** (15.0 GFLOPS, worse than ikj) due to strided memory access
+- **4X8 register-blocked microkernel**: 74.4 GFLOPS at 256×256 (best small-matrix result) but **fails at 2048×2048** (15.0 GFLOPS, worse than ikj) due to strided memory access
 - **4X8 Packed**: **69.2 GFLOPS at 2048×2048** — 2.3× faster than tiled, 3.8× faster than plain ikj. Packing eliminates the memory stride bottleneck that limited the standalone micro-kernel
+- **4X8+Prefetch**: 60.2 GFLOPS — **prefetch made it worse**. The packed buffers (2KB B, 16KB A per tile) already fit in L1. The hardware prefetcher handles sequential access. Extra prefetch µops just bloat the front-end.
 - The key insight: **a register-blocked micro-kernel is only as good as its data supply. Without packing, the memory system starves the ALU.**
-- **Current gap to OpenBLAS (~180 GFLOPS)**: 69.2 GFLOPS single-threaded is ~38% of our i5-13450HX theoretical AVX2 peak (~112 GFLOPS at 3.5 GHz). Moving to 10 threads should close most of the gap.
+- **Current gap to OpenBLAS (~180 GFLOPS)**: 69.2 GFLOPS single-threaded is ~62% of our i5-13450HX theoretical AVX2 peak (~112 GFLOPS at 3.5 GHz). The bottleneck is now L2 load latency for B_packed. Multi-threading should close the gap.
 
 ---
 
@@ -211,17 +231,16 @@ The packed micro-kernel reads from these buffers with offset `kk * stride` — e
 - **Language**: C++17
 - **Compiler**: GCC (MinGW-w64) 14.2.0
 - **Compile flags**: `-O3 -march=native -ffast-math -static`
-- **Link flags**: `-lpdh` (required for Windows performance counters)
-- **Build command**: `g++ -std=c++17 -Wall -Wextra -O3 -march=native -ffast-math -static -o gemm_bench.exe src/gemm_all.cpp -lpdh`
+- **Build command**: `g++ -std=c++17 -O3 -march=native -ffast-math -static -o gemm_bench.exe src/gemm_all.cpp`
 - **Platform**: Windows 11
 - **CPU**: Intel i5-13450HX (10 cores, 2.4 GHz base, 48KB L1d, 1.25MB L2, 20MB L3)
 - **Matrix sizes tested**: 4×4, 64×64, 256×256, 2048×2048
 
 ### Theoretical Context
 
-For reference, OpenBLAS on the same hardware achieves ~180 GFLOPS on this operation. Our current best result (72.5 GFLOPS single-threaded at 256×256, 69.2 GFLOPS at 2048×2048 with packing) represents solid single-core utilization. The remaining gap comes from:
+For reference, OpenBLAS on the same hardware achieves ~180 GFLOPS on this operation. Our current best result (71.6 GFLOPS single-threaded at 256×256, 69.2 GFLOPS at 2048×2048 with packing) represents ~62% of the ~112 GFLOPS theoretical AVX2 peak. The remaining gap comes from:
 - **Multi-threading** — utilizing all 10 cores via OpenMP (~10× multiplier)
-- **Prefetching** — hiding L1/L2 memory latency inside the micro-kernel
+- **L2 load latency** — B_packed is in L2 at 2048×2048 (exceeds L1), so each access hits L2 with ~12 cycle latency. Larger tile sizes or prefetching for L2 might help
 - **Tuning** — larger register blocks (6×8, 8×8), optimal tile sizes, AVX-512 (if available)
 
 ---
