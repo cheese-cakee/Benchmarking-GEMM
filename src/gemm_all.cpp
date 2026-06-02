@@ -447,6 +447,7 @@ static double time_single(void (*kernel)(const float*, const float*, float*, int
 }
 
 int main() {
+    std::cout.setf(std::ios::unitbuf);
     std::cout << "=== GEMM Optimization Benchmarks ===\n\n";
 
     // --- 4x4 Visual Verification ---
