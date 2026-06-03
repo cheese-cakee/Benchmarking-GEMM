@@ -385,9 +385,6 @@ struct Stats { double median, min_val, max_val, stddev, gflops; };
 static Stats benchmark(void (*kernel)(const float*, const float*, float*, int),
                        const float* A, const float* B, float* C, int N,
                        const std::string& name, double total_flops) {
-    PerfCounters pc;
-    bool perf_available = false;
-
     for (int w = 0; w < WARMUP_RUNS; w++) {
         std::fill(C, C + N * N, 0.0f);
         kernel(A, B, C, N);
@@ -402,14 +399,6 @@ static Stats benchmark(void (*kernel)(const float*, const float*, float*, int),
         auto end = std::chrono::high_resolution_clock::now();
         times.push_back(std::chrono::duration<double, std::milli>(end - start).count());
         for (int i = 0; i < N * N; i++) sink += C[i];
-    }
-
-    double cycles = 0, cache_misses = 0;
-    if (perf_available) {
-        pc.stop();
-        cycles = pc.get_value(0);
-        cache_misses = pc.get_value(1);
-        pc.cleanup();
     }
 
     std::sort(times.begin(), times.end());
@@ -427,10 +416,6 @@ static Stats benchmark(void (*kernel)(const float*, const float*, float*, int),
               << std::setw(10) << times.back() << " ms  "
               << std::setw(8) << stddev << "  "
               << std::setprecision(1) << std::setw(8) << gflops << " GFLOPS";
-    if (perf_available && cycles > 0) {
-        std::cout << "  cycles: " << std::fixed << std::setprecision(0) << cycles
-                  << "  cache-misses: " << std::fixed << std::setprecision(0) << cache_misses;
-    }
     std::cout << "\n";
 
     return {median, times.front(), times.back(), stddev, gflops};
