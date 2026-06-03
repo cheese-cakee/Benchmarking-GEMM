@@ -1,6 +1,6 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra
-OPT_FLAGS = -O3 -march=native -ffast-math -static
+OPT_FLAGS = -O3 -march=native -ffast-math -fopenmp
 # Unoptimized build (shows compiler's baseline)
 debug:
 	$(CXX) $(CXXFLAGS) -O0 -o gemm_debug.exe src/gemm_all.cpp
