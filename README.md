@@ -57,7 +57,7 @@ for (int i = 0; i < N; i++) {
 }
 ```
 
-**The Flaw:** We constantly write to memory (`C[i * N + j]`) inside the innermost loop. Writing to RAM is incredibly slow. On large matrices this collapses performance due to write-through traffic saturating memory bandwidth.
+We constantly write to memory (`C[i * N + j]`) inside the innermost loop. Writing to RAM is incredibly slow. On large matrices this collapses performance due to write-through traffic saturating memory bandwidth.
 
 ### 2. Register Optimization
 
@@ -75,7 +75,7 @@ for (int i = 0; i < N; i++) {
 }
 ```
 
-**The Flaw:** We are still thrashing the CPU cache. In C++, matrices are stored in row-major order. Accessing `B[k * N + j]` inside the k loop forces the CPU to jump forward in memory by N elements every iteration, missing the cache entirely. At small sizes the compiler may auto-correct the naive version, but on large matrices the write-through penalty is severe.
+We are still thrashing the CPU cache. In C++, matrices are stored in row-major order. Accessing `B[k * N + j]` inside the k loop forces the CPU to jump forward in memory by N elements every iteration, missing the cache entirely. At small sizes the compiler may auto-correct the naive version, but on large matrices the write-through penalty is severe.
 
 ### 3. Loop Reordering (ikj Loop) - The Cache Magic
 
@@ -92,7 +92,7 @@ for (int i = 0; i < N; i++) {
 }
 ```
 
-**The Fix:** Now the innermost loop iterates over j. Both C and B are accessed sequentially (+1 offset in memory). The CPU can load entire 64-byte cache lines at once, eliminating RAM bottlenecking.
+The innermost loop now iterates over j. Both C and B are accessed sequentially (+1 offset in memory). The CPU can load entire 64-byte cache lines at once, eliminating RAM bottlenecking.
 
 ### 4. Tiled (Blocked) Optimization
 
@@ -254,32 +254,9 @@ The packed micro-kernel's register accumulators (`acc0..3`) are thread-local, so
 
 > **Why does OMP help so much?** At 2048×2048 each thread owns a 64-row horizontal strip (2048/10 ≈ 205 rows), so the working set per thread (~5 MB) fits in L2. The tile re-pack overhead is amortized across 32 micro-tiles per strip. The result is ~65% of theoretical AVX2 peak (770 GFLOPS = 6 P-cores × 128 GFLOPS each) — in the same efficiency band as production BLAS libraries.
 
-### Key Results
+## Theoretical Context
 
-- **ikj loop reorder**: 14.56× speedup over naive — the simplest cache-friendly change
-- **Tiled (64×64)**: 1.68× faster than ikj at 2048×2048 — tile fits in L1 cache
-- **4X8 register-blocked microkernel**: 74.4 GFLOPS at 256×256 (best small-matrix result) but **fails at 2048×2048** (15.0 GFLOPS, worse than ikj) due to strided memory access
-- **4X8 Packed**: **69.2 GFLOPS at 2048×2048** — 2.3× faster than tiled, 3.8× faster than plain ikj. Packing eliminates the memory stride bottleneck that limited the standalone micro-kernel
-- **4X8+Prefetch**: 60.2 GFLOPS — **prefetch made it worse**. The packed buffers (2KB B, 16KB A per tile) already fit in L1. The hardware prefetcher handles sequential access. Extra prefetch µops just bloat the front-end.
-- **4X8 Packed OMP (10 threads)**: **490.5 GFLOPS at 2048×2048** — 7.1× speedup over single-threaded packed, ~65% of theoretical AVX2 peak. Multi-threading was the final multiplier needed to extract most of the CPU's compute capacity.
-- The key insight: **a register-blocked micro-kernel is only as good as its data supply. Without packing, the memory system starves the ALU. Without multi-threading, half the silicon sits idle.**
-
----
-
-## Technical Details
-
-- **Language**: C++17
-- **Compiler**: GCC (MinGW-w64) 14.2.0
-- **Compile flags**: `-O3 -march=native -ffast-math -fopenmp`
-- **Build command**: `g++ -std=c++17 -O3 -march=native -ffast-math -fopenmp -o gemm_bench.exe src/gemm_all.cpp`
-- **OMP run**: `set OMP_NUM_THREADS=10 && gemm_bench.exe`
-- **Platform**: Windows 11
-- **CPU**: Intel i5-13450HX (6 P-cores @ 4.6 GHz, 4 E-cores @ 3.0 GHz, AVX2 only — no AVX-512; 48KB L1d, 1.25MB L2 per core, 20MB shared L3)
-- **Matrix sizes tested**: 4×4, 64×64, 256×256, 2048×2048
-
-### Theoretical Context
-
-For reference, the i5-13450HX's 6 P-cores at 4.6 GHz can each issue 2 FMAs/cycle × 8 floats × 2 ops = 32 FLOPS/cycle × 4.6 GHz = **147 GFLOPS per core**, or **~880 GFLOPS aggregate AVX2 peak** for the 6 P-cores. The single-threaded 69.2 GFLOPS result is ~47% of one core's peak. The 10-thread OMP result of 490 GFLOPS is ~65% of the 6-core AVX2 peak (~770 GFLOPS, ignoring E-cores which lack turbo headroom for sustained FMA).
+The i5-13450HX's 6 P-cores at 4.6 GHz can each issue 2 FMAs/cycle × 8 floats × 2 ops = 32 FLOPS/cycle × 4.6 GHz = **147 GFLOPS per core**, or **~880 GFLOPS aggregate AVX2 peak** for the 6 P-cores. The single-threaded 69.2 GFLOPS result is ~47% of one core's peak. The 10-thread OMP result of 490 GFLOPS is **~65% of the 6-core AVX2 peak** (~770 GFLOPS, ignoring E-cores which lack turbo headroom for sustained FMA).
 
 Production BLAS libraries (OpenBLAS, Intel MKL) typically achieve 70-85% of peak through assembly-tuned micro-kernels, larger register blocks (8×8 or 12×8), and careful NUMA-aware thread placement. The remaining gap in this project comes from:
 - **Register block size**: production kernels use 6×16 or 8×8 for better FMA pipelining
@@ -288,6 +265,15 @@ Production BLAS libraries (OpenBLAS, Intel MKL) typically achieve 70-85% of peak
 
 ---
 
+## Building
+
+```bash
+g++ -std=c++17 -O3 -march=native -ffast-math -fopenmp -o gemm_bench.exe src/gemm_all.cpp
+set OMP_NUM_THREADS=10 && gemm_bench.exe
+```
+
+GCC 14.2.0 / MinGW-w64, C++17, tested on Windows 11. Matrix sizes: 4×4, 64×64, 256×256, 2048×2048.
+
 ## License
 
-MIT License — Feel free to use this for learning or as a starting point for your own optimization projects!
+MIT
