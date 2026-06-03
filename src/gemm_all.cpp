@@ -33,7 +33,7 @@ void pack_B(const float* B, float* packed, int N, int k_start, int j_start, int 
     {
         for(int jj = 0; jj < nr; jj++)
         {
-            packed[kk * nr + jj] = B[(k_start + kk)* N + (j_start + jj)];
+            packed[kk * nr + jj] = (j_start + jj < N) ? B[(k_start + kk)* N + (j_start + jj)] : 0.0f;
         }
     }
 }
