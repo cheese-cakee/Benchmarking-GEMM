@@ -38,7 +38,7 @@ void pack_B(const float* B, float* packed, int N, int k_start, int j_start, int 
     }
 }
 
-void gemm_packed_4x8(const float* A_packed, const float* B_packed, float* C, int N, int i, int j, int kc, int mc)
+void gemm_packed_4x8(const float* A_packed, const float* B_packed, float* C, int N, int i, int j, int kc, int mc, int nr)
 {
     __m256 acc0 = _mm256_setzero_ps();
     __m256 acc1 = _mm256_setzero_ps();
@@ -58,10 +58,21 @@ void gemm_packed_4x8(const float* A_packed, const float* B_packed, float* C, int
         acc3 = _mm256_fmadd_ps(a3,b,acc3);
     }
 
-    _mm256_storeu_ps(&C[(i+0)*N + j], acc0);
-    _mm256_storeu_ps(&C[(i+1)*N + j], acc1);
-    _mm256_storeu_ps(&C[(i+2)*N + j], acc2);
-    _mm256_storeu_ps(&C[(i+3)*N + j], acc3);
+    if (nr == 8) {
+        _mm256_storeu_ps(&C[(i+0)*N + j], acc0);
+        _mm256_storeu_ps(&C[(i+1)*N + j], acc1);
+        _mm256_storeu_ps(&C[(i+2)*N + j], acc2);
+        _mm256_storeu_ps(&C[(i+3)*N + j], acc3);
+    } else {
+        __m256i mask = _mm256_setr_epi32(
+            nr > 0 ? -1 : 0, nr > 1 ? -1 : 0, nr > 2 ? -1 : 0, nr > 3 ? -1 : 0,
+            nr > 4 ? -1 : 0, nr > 5 ? -1 : 0, nr > 6 ? -1 : 0, nr > 7 ? -1 : 0
+        );
+        _mm256_maskstore_ps(&C[(i+0)*N + j], mask, acc0);
+        _mm256_maskstore_ps(&C[(i+1)*N + j], mask, acc1);
+        _mm256_maskstore_ps(&C[(i+2)*N + j], mask, acc2);
+        _mm256_maskstore_ps(&C[(i+3)*N + j], mask, acc3);
+    }
 
 }
 void gemm_naive(const float* A, const float* B, float* C, int N) {
@@ -243,7 +254,7 @@ void gemm_blocked_4x8_packed(const float* A, const float* B, float* C, int N)
                             packed_B.data(),
                             C, N,
                             i0 + ii, j0 + jj,
-                            kc, mc_main
+                            kc, mc_main, nr
                         );
                     }
 
@@ -296,7 +307,7 @@ void gemm_blocked_4x8_packed_omp(const float* A, const float* B, float* C, int N
                             packed_B.data(),
                             C, N,
                             i0 + ii, j0 + jj,
-                            kc, mc_main
+                            kc, mc_main, nr
                         );
                     }
 
@@ -317,7 +328,7 @@ void gemm_blocked_4x8_packed_omp(const float* A, const float* B, float* C, int N
 }
 
 void gemm_packed_4x8_prefetch(const float* A_packed, const float* B_packed, float* C,
-                             int N, int i, int j, int kc, int mc)
+                             int N, int i, int j, int kc, int mc, int nr)
 {
     __m256 acc0 = _mm256_setzero_ps();
     __m256 acc1 = _mm256_setzero_ps();
@@ -349,10 +360,21 @@ void gemm_packed_4x8_prefetch(const float* A_packed, const float* B_packed, floa
         acc3 = _mm256_fmadd_ps(a3, b, acc3);
     }
 
-    _mm256_storeu_ps(&C[(i + 0) * N + j], acc0);
-    _mm256_storeu_ps(&C[(i + 1) * N + j], acc1);
-    _mm256_storeu_ps(&C[(i + 2) * N + j], acc2);
-    _mm256_storeu_ps(&C[(i + 3) * N + j], acc3);
+    if (nr == 8) {
+        _mm256_storeu_ps(&C[(i + 0) * N + j], acc0);
+        _mm256_storeu_ps(&C[(i + 1) * N + j], acc1);
+        _mm256_storeu_ps(&C[(i + 2) * N + j], acc2);
+        _mm256_storeu_ps(&C[(i + 3) * N + j], acc3);
+    } else {
+        __m256i mask = _mm256_setr_epi32(
+            nr > 0 ? -1 : 0, nr > 1 ? -1 : 0, nr > 2 ? -1 : 0, nr > 3 ? -1 : 0,
+            nr > 4 ? -1 : 0, nr > 5 ? -1 : 0, nr > 6 ? -1 : 0, nr > 7 ? -1 : 0
+        );
+        _mm256_maskstore_ps(&C[(i + 0) * N + j], mask, acc0);
+        _mm256_maskstore_ps(&C[(i + 1) * N + j], mask, acc1);
+        _mm256_maskstore_ps(&C[(i + 2) * N + j], mask, acc2);
+        _mm256_maskstore_ps(&C[(i + 3) * N + j], mask, acc3);
+    }
 }
 
 void gemm_blocked_4x8_packed_prefetch(const float* A, const float* B, float* C, int N)
@@ -387,7 +409,7 @@ void gemm_blocked_4x8_packed_prefetch(const float* A, const float* B, float* C, 
                             packed_B.data(),
                             C, N,
                             i0 + ii, j0 + jj,
-                            kc, mc_main
+                            kc, mc_main, nr
                         );
                     }
 
@@ -440,7 +462,7 @@ void gemm_blocked_4x8_packed_prefetch_omp(const float* A, const float* B, float*
                             packed_B.data(),
                             C, N,
                             i0 + ii, j0 + jj,
-                            kc, mc_main
+                            kc, mc_main, nr
                         );
                     }
 
