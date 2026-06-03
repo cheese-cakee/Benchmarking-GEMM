@@ -335,10 +335,10 @@ void gemm_packed_4x8_prefetch(const float* A_packed, const float* B_packed, floa
     __m256 acc2 = _mm256_setzero_ps();
     __m256 acc3 = _mm256_setzero_ps();
 
-    _mm_prefetch((const char*)&B_packed[0 * 8], _MM_HINT_NTA);
-    _mm_prefetch((const char*)&B_packed[1 * 8], _MM_HINT_NTA);
-    _mm_prefetch((const char*)&A_packed[0 * mc], _MM_HINT_NTA);
-    _mm_prefetch((const char*)&A_packed[1 * mc], _MM_HINT_NTA);
+    if (kc > 1) {
+        _mm_prefetch((const char*)&B_packed[1 * 8], _MM_HINT_NTA);
+        _mm_prefetch((const char*)&A_packed[1 * mc], _MM_HINT_NTA);
+    }
 
     const int PREFETCH_DIST = 2;
     for (int kk = 0; kk < kc; kk++) {
