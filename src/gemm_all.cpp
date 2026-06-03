@@ -536,13 +536,13 @@ static Stats benchmark(void (*kernel)(const float*, const float*, float*, int),
     double stddev = std::sqrt(var / TIMED_RUNS);
     double gflops = total_flops / (median / 1000.0) / 1e9;
 
-    std::cout << std::left << std::setw(22) << name
-              << std::fixed << std::setprecision(1)
-              << std::setw(10) << median << " ms  "
+    std::cout << std::left << std::setw(24) << name
+              << std::right
+              << std::setw(10) << std::fixed << std::setprecision(1) << median   << " ms  "
               << std::setw(10) << times.front() << " ms  "
-              << std::setw(10) << times.back() << " ms  "
-              << std::setw(8) << stddev << "  "
-              << std::setprecision(1) << std::setw(8) << gflops << " GFLOPS";
+              << std::setw(10) << times.back()  << " ms  "
+              << std::setw(10) << stddev << "  "
+              << std::setw(7) << std::setprecision(1) << gflops << " GFLOPS";
     std::cout << "\n";
 
     return {median, times.front(), times.back(), stddev, gflops};
@@ -560,6 +560,7 @@ static double time_single(void (*kernel)(const float*, const float*, float*, int
 
 int main() {
     std::cout.setf(std::ios::unitbuf);
+    setvbuf(stdout, NULL, _IONBF, 0);
     std::cout << "=== GEMM Optimization Benchmarks ===\n\n";
 
     // --- 4x4 Visual Verification ---
@@ -574,27 +575,33 @@ int main() {
         print_matrix(Ref.data(), N, "Reference Output");
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_naive(A.data(), B.data(), C.data(), N);
-        std::cout << "Naive ijk:          " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "Naive ijk" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_register(A.data(), B.data(), C.data(), N);
-        std::cout << "Register optimized: " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "Register optimized" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_ikj(A.data(), B.data(), C.data(), N);
-        std::cout << "Loop reorder ikj:   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "Loop reorder ikj" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_tiled(A.data(), B.data(), C.data(), N, 64);
-        std::cout << "Tiled (64x64):   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "Tiled (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_avx2(A.data(), B.data(), C.data(), N);
-        std::cout << "AVX2 (64x64):   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "AVX2 (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_blocked_4x8(A.data(), B.data(), C.data(), N);
-        std::cout << "4X8 Microkernel(64x64):   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "4X8 Microkernel" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_blocked_4x8_packed(A.data(), B.data(), C.data(), N);
-        std::cout << "4X8 Packed (64x64):   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "4X8 Packed" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_blocked_4x8_packed_prefetch(A.data(), B.data(), C.data(), N);
-        std::cout << "4X8 Pack+Prefetch:    " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
+        std::cout << std::left << std::setw(30) << "4X8+Prefetch" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::fill(C.begin(), C.end(), 0.0f);
+        gemm_blocked_4x8_packed_omp(A.data(), B.data(), C.data(), N);
+        std::cout << std::left << std::setw(30) << "4X8 Packed OMP" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::fill(C.begin(), C.end(), 0.0f);
+        gemm_blocked_4x8_packed_prefetch_omp(A.data(), B.data(), C.data(), N);
+        std::cout << std::left << std::setw(30) << "4X8+Prefetch OMP" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
     }
 
     // --- 64x64 Correctness Check ---
@@ -606,24 +613,28 @@ int main() {
         gemm_register(A.data(), B.data(), Ref.data(), N);
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_naive(A.data(), B.data(), C.data(), N);
-        std::cout << "Naive ijk:          " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "Naive ijk" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_register(A.data(), B.data(), C.data(), N);
-        std::cout << "Register optimized: " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "Register optimized" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_ikj(A.data(), B.data(), C.data(), N);
-        std::cout << "Loop reorder ikj:   " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "Loop reorder ikj" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_tiled(A.data(), B.data(), C.data(), N, 64);
-        std::cout << "Tiled (64x64):      " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "Tiled (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         std::fill(C.begin(), C.end(), 0.0f);
         gemm_avx2(A.data(), B.data(), C.data(), N);
-        std::cout << "AVX2 (64x64):      " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "AVX2 (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_blocked_4x8(A.data(), B.data(), C.data(), N);
-        std::cout << "4X8 Micorkernel(64x64):      " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "4X8 Microkernel (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_blocked_4x8_packed(A.data(), B.data(), C.data(), N);
-        std::cout << "4X8 Packed (64x64):      " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "4X8 Packed (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_blocked_4x8_packed_prefetch(A.data(), B.data(), C.data(), N);
-        std::cout << "4X8 Pack+Prefetch:       " << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
+        std::cout << std::left << std::setw(30) << "4X8+Prefetch (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        gemm_blocked_4x8_packed_omp(A.data(), B.data(), C.data(), N);
+        std::cout << std::left << std::setw(30) << "4X8 Packed OMP (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        gemm_blocked_4x8_packed_prefetch_omp(A.data(), B.data(), C.data(), N);
+        std::cout << std::left << std::setw(30) << "4X8+Prefetch OMP (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
     }
 
     // --- 256x256 Benchmark (all kernels, fast) ---
@@ -632,13 +643,14 @@ int main() {
         double total_flops = 2.0 * N * N * N;
         std::cout << "--- Benchmark (256x256) - all kernels ---\n";
         std::cout << "Total FLOPs: " << std::fixed << std::setprecision(2) << (total_flops / 1e6) << " million\n\n";
-        std::cout << std::left << std::setw(22) << "Kernel"
-                  << std::setw(12) << "Median"
-                  << std::setw(12) << "Min"
-                  << std::setw(12) << "Max"
-                  << std::setw(10) << "StdDev"
-                  << std::setw(12) << "GFLOPS" << "\n";
-        std::cout << std::string(70, '-') << "\n";
+        std::cout << std::left << std::setw(24) << "Kernel"
+                  << std::right
+                  << std::setw(14) << "Median"
+                  << std::setw(14) << "Min"
+                  << std::setw(14) << "Max"
+                  << std::setw(12) << "StdDev"
+                  << std::setw(14) << "GFLOPS" << "\n";
+        std::cout << std::string(92, '-') << "\n";
 
         std::vector<float> A(N*N), B(N*N), C(N*N);
         init_matrix(A, N); init_matrix(B, N);
@@ -652,6 +664,8 @@ int main() {
         Stats s_blocked = benchmark(gemm_blocked_4x8, A.data(), B.data(), C.data(), N, "4X8 Microkernel", total_flops);
         Stats s_packed = benchmark(gemm_blocked_4x8_packed, A.data(),B.data(), C.data(), N, "4X8 Packed", total_flops);
         Stats s_prefetch = benchmark(gemm_blocked_4x8_packed_prefetch, A.data(),B.data(), C.data(), N, "4X8+Prefetch", total_flops);
+        Stats s_packed_omp = benchmark(gemm_blocked_4x8_packed_omp, A.data(), B.data(), C.data(), N, "4X8 Packed OMP", total_flops);
+        Stats s_prefetch_omp = benchmark(gemm_blocked_4x8_packed_prefetch_omp, A.data(), B.data(), C.data(), N, "4X8+Prefetch OMP", total_flops);
 
         std::cout << "\n--- Speedups (vs Naive) ---\n";
         std::cout << "Register optimized: " << std::fixed << std::setprecision(2) << s_naive.median / s_reg.median << "x\n";
@@ -670,13 +684,14 @@ int main() {
         std::cout << "\n--- Benchmark (2048x2048) - full size ---\n";
         std::cout << "Total FLOPs: " << std::fixed << std::setprecision(2) << (total_flops / 1e9) << " billion\n";
         std::cout << "(Naive/Register omitted - would take ~35+ min each)\n\n";
-        std::cout << std::left << std::setw(22) << "Kernel"
-                  << std::setw(12) << "Median"
-                  << std::setw(12) << "Min"
-                  << std::setw(12) << "Max"
-                  << std::setw(10) << "StdDev"
-                  << std::setw(12) << "GFLOPS" << "\n";
-        std::cout << std::string(70, '-') << "\n";
+        std::cout << std::left << std::setw(24) << "Kernel"
+                  << std::right
+                  << std::setw(14) << "Median"
+                  << std::setw(14) << "Min"
+                  << std::setw(14) << "Max"
+                  << std::setw(12) << "StdDev"
+                  << std::setw(14) << "GFLOPS" << "\n";
+        std::cout << std::string(92, '-') << "\n";
 
         std::vector<float> A(N*N), B(N*N), C(N*N);
         init_matrix(A, N); init_matrix(B, N);
@@ -688,6 +703,8 @@ int main() {
         Stats s_blocked = benchmark(gemm_blocked_4x8, A.data(), B.data(), C.data(), N, "4X8 Microkernel", total_flops);
         Stats s_packed = benchmark(gemm_blocked_4x8_packed,A.data(), B.data() ,C.data(),N, "Packed 4x8", total_flops);
         Stats s_prefetch = benchmark(gemm_blocked_4x8_packed_prefetch,A.data(), B.data() ,C.data(),N, "4X8+Prefetch", total_flops);
+        Stats s_packed_omp = benchmark(gemm_blocked_4x8_packed_omp, A.data(), B.data(), C.data(), N, "Packed 4x8 OMP", total_flops);
+        Stats s_prefetch_omp = benchmark(gemm_blocked_4x8_packed_prefetch_omp, A.data(), B.data(), C.data(), N, "4X8+Prefetch OMP", total_flops);
 
         // Project naive and register from 256x256 ratios
         std::cout << "\n--- Projected speedups (from 256x256 ratios) ---\n";
