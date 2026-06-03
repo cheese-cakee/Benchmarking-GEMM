@@ -667,14 +667,16 @@ int main() {
         Stats s_packed_omp = benchmark(gemm_blocked_4x8_packed_omp, A.data(), B.data(), C.data(), N, "4X8 Packed OMP", total_flops);
         Stats s_prefetch_omp = benchmark(gemm_blocked_4x8_packed_prefetch_omp, A.data(), B.data(), C.data(), N, "4X8+Prefetch OMP", total_flops);
 
-        std::cout << "\n--- Speedups (vs Naive) ---\n";
-        std::cout << "Register optimized: " << std::fixed << std::setprecision(2) << s_naive.median / s_reg.median << "x\n";
-        std::cout << "Loop reorder ikj:   " << std::fixed << std::setprecision(2) << s_naive.median / s_ikj.median << "x\n";
-        std::cout << "Tiled 64x64:        " << std::fixed << std::setprecision(2) << s_naive.median / s_tiled.median << "x\n";
-        std::cout << "AVX2:               " << std::fixed << std::setprecision(2) << s_naive.median / s_avx2.median << "x\n";
-        std::cout << "4X8 Microkernel:    " << std::fixed << std::setprecision(2) << s_naive.median / s_blocked.median << "x\n";
-        std::cout << "4X8 Packed:         " << std::fixed << std::setprecision(2) << s_naive.median / s_packed.median << "x\n";
-        std::cout << "4X8+Prefetch:       " << std::fixed << std::setprecision(2) << s_naive.median / s_prefetch.median << "x\n";
+        std::cout << "\n--- Speedups (256x256 vs Naive) ---\n";
+        std::cout << std::left << std::setw(30) << "Register optimized"    << std::right << std::setw(8) << std::fixed << std::setprecision(2) << s_naive.median / s_reg.median        << "x\n";
+        std::cout << std::left << std::setw(30) << "Loop reorder ikj"      << std::right << std::setw(8) << s_naive.median / s_ikj.median        << "x\n";
+        std::cout << std::left << std::setw(30) << "Tiled 64x64"           << std::right << std::setw(8) << s_naive.median / s_tiled.median      << "x\n";
+        std::cout << std::left << std::setw(30) << "AVX2 ikj"              << std::right << std::setw(8) << s_naive.median / s_avx2.median       << "x\n";
+        std::cout << std::left << std::setw(30) << "4X8 Microkernel"       << std::right << std::setw(8) << s_naive.median / s_blocked.median    << "x\n";
+        std::cout << std::left << std::setw(30) << "4X8 Packed"            << std::right << std::setw(8) << s_naive.median / s_packed.median     << "x\n";
+        std::cout << std::left << std::setw(30) << "4X8+Prefetch"          << std::right << std::setw(8) << s_naive.median / s_prefetch.median   << "x\n";
+        std::cout << std::left << std::setw(30) << "4X8 Packed OMP"        << std::right << std::setw(8) << s_naive.median / s_packed_omp.median  << "x\n";
+        std::cout << std::left << std::setw(30) << "4X8+Prefetch OMP"      << std::right << std::setw(8) << s_naive.median / s_prefetch_omp.median << "x\n";
     }
 
     // --- 2048x2048 Benchmark (ikj only, projected others) ---
@@ -707,14 +709,13 @@ int main() {
         Stats s_prefetch_omp = benchmark(gemm_blocked_4x8_packed_prefetch_omp, A.data(), B.data(), C.data(), N, "4X8+Prefetch OMP", total_flops);
 
         // Project naive and register from 256x256 ratios
-        std::cout << "\n--- Projected speedups (from 256x256 ratios) ---\n";
-        std::cout << "Naive (projected ~35 min)       vs ikj: " << std::fixed << std::setprecision(1)
-                  << (35000.0 / s_ikj.median) << "x\n";
-        double tiled_gflops = total_flops / (tiled_time / 1000.0) / 1e9;
-        std::cout << "Tiled 64x64 actual: " << std::fixed << std::setprecision(1)
-                  << tiled_time << " ms  " << tiled_gflops << " GFLOPS\n";
-        std::cout << "Tiled vs ikj speedup: " << std::fixed << std::setprecision(2)
-                  << s_ikj.median / tiled_time << "x\n";
+        std::cout << "\n--- Speedups (2048x2048 vs ikj) ---\n";
+        std::cout << std::left << std::setw(30) << "AVX2 ikj"              << std::right << std::setw(8) << std::fixed << std::setprecision(2) << s_ikj.median / s_avx2.median       << "x\n";
+        std::cout << std::left << std::setw(30) << "4X8 Microkernel"       << std::right << std::setw(8) << s_ikj.median / s_blocked.median    << "x\n";
+        std::cout << std::left << std::setw(30) << "Packed 4x8"            << std::right << std::setw(8) << s_ikj.median / s_packed.median     << "x\n";
+        std::cout << std::left << std::setw(30) << "4X8+Prefetch"          << std::right << std::setw(8) << s_ikj.median / s_prefetch.median   << "x\n";
+        std::cout << std::left << std::setw(30) << "Packed 4x8 OMP"        << std::right << std::setw(8) << s_ikj.median / s_packed_omp.median  << "x\n";
+        std::cout << std::left << std::setw(30) << "4X8+Prefetch OMP"      << std::right << std::setw(8) << s_ikj.median / s_prefetch_omp.median << "x\n";
     }
 
     return 0;
