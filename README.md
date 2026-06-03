@@ -1,8 +1,19 @@
 # GEMM Optimization Benchmarks in C++
 
-This repository explores the step-by-step optimization of **General Matrix Multiplication (GEMM)** in C++. GEMM is the core mathematical operation behind nearly all modern deep learning models, including Large Language Models and Vision Transformers.
+<div align="center">
 
-This project starts with a mathematically correct but highly inefficient "naive" implementation and gradually applies memory, caching, SIMD, and multi-threading optimizations to achieve massive performance gains.
+![C++17](https://img.shields.io/badge/C++-17-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)
+![AVX2](https://img.shields.io/badge/SIMD-AVX2-FF6B6B?style=for-the-badge&logo=intel&logoColor=white)
+![OpenMP](https://img.shields.io/badge/Parallel-OpenMP-1A6FCF?style=for-the-badge&logo=openmp&logoColor=white)
+![GCC](https://img.shields.io/badge/GCC-14.2.0-FFB400?style=for-the-badge&logo=gnu&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-11-0078D6?style=for-the-badge&logo=windows&logoColor=white)
+![Build](https://img.shields.io/badge/Build-Make-A42E2E?style=for-the-badge&logo=make&logoColor=white)
+![Peak](https://img.shields.io/badge/Peak-490_GFLOPS-00C853?style=for-the-badge&logo=speedtest&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
+
+</div>
+
+A step-by-step journey from naive ijk loops to a **490 GFLOPS** cache-friendly, AVX2-vectorized, OpenMP-parallel GEMM kernel.
 
 ---
 
