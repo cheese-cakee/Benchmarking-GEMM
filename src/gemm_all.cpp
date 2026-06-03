@@ -263,6 +263,59 @@ void gemm_blocked_4x8_packed(const float* A, const float* B, float* C, int N)
     }
 }
 
+void gemm_blocked_4x8_packed_omp(const float* A, const float* B, float* C, int N)
+{
+    for (int i = 0; i < N * N; i++) C[i] = 0;
+
+    const int TILE = 64;
+    const int MR = 4;
+    const int NR = 8;
+
+    #pragma omp parallel for schedule(dynamic)
+    for (int i0 = 0; i0 < N; i0 += TILE) {
+        int mc = std::min(TILE, N - i0);
+        int mc_main = mc - (mc % MR);
+
+        for (int k0 = 0; k0 < N; k0 += TILE) {
+            int kc = std::min(TILE, N - k0);
+            std::vector<float> packed_A(mc_main * kc);
+            pack_A(A, packed_A.data(), N, i0, k0, mc_main, kc);
+
+            for (int j0 = 0; j0 < N; j0 += TILE) {
+                int nc = std::min(TILE, N - j0);
+
+                for (int jj = 0; jj < nc; jj += NR) {
+                    int nr = std::min(NR, nc - jj);
+
+                    std::vector<float> packed_B(kc * NR);
+                    pack_B(B, packed_B.data(), N, k0, j0 + jj, kc, NR);
+
+                    for (int ii = 0; ii < mc_main; ii += MR) {
+                        gemm_packed_4x8(
+                            packed_A.data() + ii,
+                            packed_B.data(),
+                            C, N,
+                            i0 + ii, j0 + jj,
+                            kc, mc_main
+                        );
+                    }
+
+                    for (int r = mc_main; r < mc; r++) {
+                        for (int kk = 0; kk < kc; kk++) {
+                            float a_val = A[(i0 + r) * N + (k0 + kk)];
+                            for (int c = 0; c < nr; c++) {
+                                C[(i0 + r) * N + (j0 + jj + c)] += a_val * B[(k0 + kk) * N + (j0 + jj + c)];
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+
+    }
+}
+
 void gemm_packed_4x8_prefetch(const float* A_packed, const float* B_packed, float* C,
                              int N, int i, int j, int kc, int mc)
 {
@@ -310,6 +363,59 @@ void gemm_blocked_4x8_packed_prefetch(const float* A, const float* B, float* C, 
     const int MR = 4;
     const int NR = 8;
 
+    for (int i0 = 0; i0 < N; i0 += TILE) {
+        int mc = std::min(TILE, N - i0);
+        int mc_main = mc - (mc % MR);
+
+        for (int k0 = 0; k0 < N; k0 += TILE) {
+            int kc = std::min(TILE, N - k0);
+            std::vector<float> packed_A(mc_main * kc);
+            pack_A(A, packed_A.data(), N, i0, k0, mc_main, kc);
+
+            for (int j0 = 0; j0 < N; j0 += TILE) {
+                int nc = std::min(TILE, N - j0);
+
+                for (int jj = 0; jj < nc; jj += NR) {
+                    int nr = std::min(NR, nc - jj);
+
+                    std::vector<float> packed_B(kc * NR);
+                    pack_B(B, packed_B.data(), N, k0, j0 + jj, kc, NR);
+
+                    for (int ii = 0; ii < mc_main; ii += MR) {
+                        gemm_packed_4x8_prefetch(
+                            packed_A.data() + ii,
+                            packed_B.data(),
+                            C, N,
+                            i0 + ii, j0 + jj,
+                            kc, mc_main
+                        );
+                    }
+
+                    for (int r = mc_main; r < mc; r++) {
+                        for (int kk = 0; kk < kc; kk++) {
+                            float a_val = A[(i0 + r) * N + (k0 + kk)];
+                            for (int c = 0; c < nr; c++) {
+                                C[(i0 + r) * N + (j0 + jj + c)] += a_val * B[(k0 + kk) * N + (j0 + jj + c)];
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+
+    }
+}
+
+void gemm_blocked_4x8_packed_prefetch_omp(const float* A, const float* B, float* C, int N)
+{
+    for (int i = 0; i < N * N; i++) C[i] = 0;
+
+    const int TILE = 64;
+    const int MR = 4;
+    const int NR = 8;
+
+    #pragma omp parallel for schedule(dynamic)
     for (int i0 = 0; i0 < N; i0 += TILE) {
         int mc = std::min(TILE, N - i0);
         int mc_main = mc - (mc % MR);
