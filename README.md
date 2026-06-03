@@ -13,7 +13,7 @@
 
 </div>
 
-A step-by-step journey from naive ijk loops to a **490 GFLOPS** cache-friendly, AVX2-vectorized, OpenMP-parallel GEMM kernel.
+Step-by-step C++17 GEMM optimization: ten kernels from naive ijk to AVX2 + OpenMP, peaking at **490 GFLOPS** at 2048×2048 on an i5-13450HX.
 
 ---
 
