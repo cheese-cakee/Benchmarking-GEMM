@@ -6,9 +6,8 @@
 #include <numeric>
 #include <iomanip>
 #include <string>
-#include<immintrin.h>
-//#define NOMINMAX
-#include "perf_counters.hpp"
+#include <omp.h>
+#include <immintrin.h>
 
 constexpr int FULL_N = 2048;
 constexpr int VERIFY_N = 64;
