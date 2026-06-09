@@ -43,7 +43,7 @@ All benchmarks were run on an **Intel i5-13450HX** (13th Gen, 10 cores) multiply
 
 ### 1. The Naive Implementation (ijk loop)
 
-The most natural way to write matrix multiplication is a triple-nested loop corresponding to the mathematical formula:
+The most natural way to write matrix multiplication is a triple nested loop corresponding to the mathematical formula:
 
 ```cpp
 for (int i = 0; i < N; i++) {
@@ -57,7 +57,7 @@ for (int i = 0; i < N; i++) {
 }
 ```
 
-We constantly write to memory (`C[i * N + j]`) inside the innermost loop. Writing to RAM is incredibly slow. On large matrices this collapses performance due to write-through traffic saturating memory bandwidth.
+We constantly write to memory (`C[i * N + j]`) inside the innermost loop. Writing to RAM is incredibly slow. On large matrices this collapses performance due to write through traffic saturating memory bandwidth.
 
 ### 2. Register Optimization
 
@@ -118,16 +118,16 @@ for (int i = 0; i < N; i += tile_size) {
 
 ### 5. Compiler Flags
 
-Writing cache-friendly code is only half the battle. Unleashing the compiler pushes it to the limit:
+Writing cache friendly code is only half the battle. Unleashing the compiler pushes it to the limit:
 
 - `-O3`: Enables aggressive optimizations (loop unrolling, function inlining, vectorization)
-- `-march=native`: Uses CPU-specific instructions for your architecture
+- `-march=native`: Uses CPU specific instructions for your architecture
 - `-ffast-math`: Enables faster (though sometimes less precise) mathematical operations
 - `-fopenmp`: Enables OpenMP multi-threading support
 
 ### 6. Register-Blocked Micro-Kernel (4×8)
 
-The ikj and tiled kernels still load C from memory on every k-iteration. A register-blocked kernel keeps C accumulators in YMM registers across the entire k-loop:
+The ikj and tiled kernels still load C from memory on every k-iteration. A register blocked kernel keeps C accumulators in YMM registers across the entire k loop:
 
 ```cpp
 for (int i = 0; i < N; i += 4) {
@@ -151,7 +151,7 @@ for (int i = 0; i < N; i += 4) {
 
 ### 7. Packing — Feeding the Micro-Kernel
 
-Copy tiles of A and B into contiguous buffers so every load inside the micro-kernel is sequential:
+Copy tiles of A and B into contiguous buffers so every load inside the micro kernel is sequential:
 
 ```cpp
 // Pack A: mc rows × kc cols, stored as [kk * mc + ii]
@@ -174,13 +174,13 @@ void pack_B(const float* B, float* packed, int N,
 }
 ```
 
-The packed micro-kernel reads from these buffers with offset `kk * stride` — every access is a cache line hit. Combined with 4×8 register blocking, this achieves **69.2 GFLOPS** at 2048×2048, a 2.3× improvement over plain tiling.
+The packed micro kernel reads from these buffers with offset `kk * stride` — every access is a cache line hit. Combined with 4×8 register blocking, this achieves **69.2 GFLOPS** at 2048×2048, a 2.3× improvement over plain tiling.
 
-**Tail handling:** The micro-kernel always operates on 8 columns (one AVX2 vector). When the matrix width isn't a multiple of 8, the final tile is smaller. We pass `nr` (the actual number of valid columns) to the kernel and use `_mm256_maskstore_ps` with a runtime-generated mask for the tail. This was a critical bugfix — without it, the kernels overwrote memory past the matrix edge and crashed on small sizes (4×4, etc.).
+**Tail handling:** The micro kernel always operates on 8 columns (one AVX2 vector). When the matrix width isn't a multiple of 8, the final tile is smaller. We pass `nr` (the actual number of valid columns) to the kernel and use `_mm256_maskstore_ps` with a runtime generated mask for the tail. This was a critical bugfix — without it, the kernels overwrote memory past the matrix edge and crashed on small sizes (4×4, etc.).
 
 ### 8. Prefetching — When It Hurts
 
-With the packed micro-kernel hitting ~69 GFLOPS, the natural next step is to hide memory latency with software prefetch:
+With the packed micro kernel hitting ~69 GFLOPS, the natural next step is to hide memory latency with software prefetch:
 
 ```cpp
 _mm_prefetch((const char*)&B_packed[(kk + 2) * 8], _MM_HINT_NTA);
@@ -233,7 +233,7 @@ The packed micro-kernel's register accumulators (`acc0..3`) are thread-local, so
 | 4X8 Packed OMP | 0.3 ms | 117.7 | 29.43x |
 | 4X8+Prefetch OMP | 0.3 ms | 117.1 | 29.27x |
 
-> **Note:** At 256×256 the entire working set (~768KB) fits in L2 cache, so all competitive kernels cluster near peak bandwidth. Prefetch hurts even here — the packed buffers already live in L1. The OMP numbers are noisy (±30%) because the small workload is dominated by thread-launch and E-core vs P-core placement.
+> **Note:** At 256×256 the entire working set (~768KB) fits in L2 cache, so all competitive kernels cluster near peak bandwidth. Prefetch hurts even here — the packed buffers already live in L1. The OMP numbers are noisy (±30%) because the small workload is dominated by thread launch and E-core vs P-core placement.
 
 ### 2048x2048 Matrix (17.18 Billion FLOPs)
 
@@ -242,7 +242,7 @@ The packed micro-kernel's register accumulators (`acc0..3`) are thread-local, so
 | Kernel | Median Time | GFLOPS | Notes |
 |--------|-------------|--------|-------|
 | Loop reorder (ikj) | 938.0 ms | 18.3 | Baseline — sequential access, no reuse |
-| AVX2 ikj | 854.0 ms | 20.1 | Slightly faster; same memory-bottleneck pattern |
+| AVX2 ikj | 854.0 ms | 20.1 | Slightly faster; same memory bottleneck pattern |
 | 4X8 Microkernel (unpacked) | 1146.4 ms | 15.0 | Slower — A/B stride across N=2048 destroys cache |
 | Tiled 64x64 | 559.6 ms | 30.7 | 1.68× faster than ikj — tile fits in L1 |
 | **4X8 Packed** | **248.4 ms** | **69.2** | **2.3× faster than tiled — packing + micro-kernel** |
@@ -258,10 +258,10 @@ The packed micro-kernel's register accumulators (`acc0..3`) are thread-local, so
 
 The i5-13450HX's 6 P-cores at 4.6 GHz can each issue 2 FMAs/cycle × 8 floats × 2 ops = 32 FLOPS/cycle × 4.6 GHz = **147 GFLOPS per core**, or **~880 GFLOPS aggregate AVX2 peak** for the 6 P-cores. The single-threaded 69.2 GFLOPS result is ~47% of one core's peak. The 10-thread OMP result of 490 GFLOPS is **~65% of the 6-core AVX2 peak** (~770 GFLOPS, ignoring E-cores which lack turbo headroom for sustained FMA).
 
-Production BLAS libraries (OpenBLAS, Intel MKL) typically achieve 70-85% of peak through assembly-tuned micro-kernels, larger register blocks (8×8 or 12×8), and careful NUMA-aware thread placement. The remaining gap in this project comes from:
+Production BLAS libraries (OpenBLAS, Intel MKL) typically achieve 70-85% of peak through assembly-tuned micro-kernels, larger register blocks (8×8 or 12×8), and careful NUMA aware thread placement. The remaining gap in this project comes from:
 - **Register block size**: production kernels use 6×16 or 8×8 for better FMA pipelining
 - **L2 latency**: B_packed sits in L2 at 2048×2048 (16 KB per tile). Larger tiles or L2-targeted prefetch could help
-- **E-core underutilization**: the 4 E-cores @ 3.0 GHz are included in `OMP_NUM_THREADS=10` but contribute less per-thread
+- **E-core underutilization**: the 4 E-cores @ 3.0 GHz are included in `OMP_NUM_THREADS=10` but contribute less per thread
 
 ---
 
