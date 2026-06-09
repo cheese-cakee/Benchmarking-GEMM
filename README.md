@@ -218,7 +218,7 @@ The packed micro-kernel's register accumulators (`acc0..3`) are thread-local, so
 
 ### 256x256 Matrix (33.55 Million FLOPs)
 
-![256x256 benchmark](docs/256x256.png)
+![256x256 benchmark](docs/2048x2048.png)
 
 | Kernel | Median Time | GFLOPS | Speedup vs Naive |
 |--------|-------------|--------|------------------|
@@ -237,7 +237,7 @@ The packed micro-kernel's register accumulators (`acc0..3`) are thread-local, so
 
 ### 2048x2048 Matrix (17.18 Billion FLOPs)
 
-![2048x2048 benchmark](docs/2048x2048.png)
+![2048x2048 benchmark](docs/256x256.png)
 
 | Kernel | Median Time | GFLOPS | Notes |
 |--------|-------------|--------|-------|
