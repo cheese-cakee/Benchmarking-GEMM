@@ -8,7 +8,51 @@ textbook triple loop to a packed, register-blocked AVX2 micro-kernel running on 
 Each kernel isolates one idea, and every result is verified against a double-precision
 reference before it is reported.
 
-<!-- RESULTS -->
+## Results
+
+Intel Core i5-13450HX (6 P-cores + 4 E-cores), GCC 13.3 in WSL2 (Ubuntu 24.04), `-O3 -march=native
+-ffast-math`, 10 OpenMP threads, laptop on AC power. Median of interleaved runs; every run verified.
+
+| Kernel | N = 256 GFLOPS | N = 2048 GFLOPS | N = 2048 time |
+| --- | ---: | ---: | ---: |
+| `naive` | 3.5 | skipped by default | |
+| `register` | 4.3 | skipped by default | |
+| `ikj` | 30.7 | 15.9 | 1077 ms |
+| `tiled64` | 23.9 | 19.1 | 899 ms |
+| `avx2_ikj` | 31.9 | 15.9 | 1082 ms |
+| `micro4x8` | 67.5 | 11.6 | 1484 ms |
+| `packed4x8` | 63.1 | 57.3 | 300 ms |
+| `packed4x8_prefetch` | 53.7 | 48.9 | 351 ms |
+| **`packed4x8_omp`** | 102.1 | **323.2** | **53 ms** |
+| `packed4x8_prefetch_omp` | 142.0 | 255.3 | 67 ms |
+
+![GFLOPS at N = 2048](docs/img/gflops-n2048.png)
+
+What the numbers show:
+
+- **Memory access order matters more than instructions.** Reordering loops (`ikj`) is a 7× jump at
+  N = 256; hand-written AVX2 on the same order (`avx2_ikj`) adds nothing, because the compiler
+  already vectorizes it.
+- **Register blocking wins in cache and collapses out of it.** `micro4x8` is the fastest
+  single-threaded kernel at N = 256 and the slowest non-scalar one at N = 2048, where its
+  column-strided reads miss the cache. Packing fixes that: 5× faster at N = 2048.
+- **Software prefetch hurts** at both sizes: the packed buffers are already in L1.
+- **Threads:** 5.6× from 10 threads at N = 2048. At N = 256 there are only four 64-row strips, so
+  at most four threads have work and the result is noisy.
+- **Against peak:** 323 GFLOPS is about 42% of the six P-cores' AVX2 peak at a sustained 4.0 GHz
+  (768 GFLOPS). The [guide](docs/optimization-guide.md#4-where-the-remaining-gap-is) lists what
+  closes the rest of the gap.
+
+Raw samples with machine metadata: [`results/`](results). N = 256 uses 51 repetitions with no
+pause; N = 2048 uses 7 repetitions with a 250 ms pause between runs. The same N = 2048 suite run
+twice gave 321.0 and 323.2 GFLOPS for `packed4x8_omp`.
+
+Earlier versions of this README reported 490 GFLOPS. That figure came from a packed kernel that
+dropped all but the last 64-deep slice of each dot product (fixed in
+[#1](https://github.com/cheese-cakee/Benchmarking-GEMM/pull/1)), measured natively on Windows. Long
+native Windows runs on this laptop were also unreliable, with some runs 10× slower than short
+ones (most likely the OS throttling a background process), so the published numbers come from
+WSL2.
 
 ## How it works
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot median GFLOPS per kernel from a gemm_bench CSV, one chart per matrix size."""
+"""Plot median GFLOPS per kernel from gemm_bench CSVs, one chart per matrix size."""
 
 import argparse
 import csv
@@ -13,16 +13,17 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-def read_samples(path):
+def read_samples(paths):
     samples = defaultdict(list)  # (n, kernel) -> [gflops]
     order = []
-    with open(path, encoding="utf-8") as handle:
-        rows = csv.DictReader(line for line in handle if not line.startswith("#"))
-        for row in rows:
-            key = (int(row["n"]), row["kernel"])
-            if key not in samples:
-                order.append(key)
-            samples[key].append(float(row["gflops"]))
+    for path in paths:
+        with open(path, encoding="utf-8") as handle:
+            rows = csv.DictReader(line for line in handle if not line.startswith("#"))
+            for row in rows:
+                key = (int(row["n"]), row["kernel"])
+                if key not in samples:
+                    order.append(key)
+                samples[key].append(float(row["gflops"]))
     return samples, order
 
 
@@ -46,7 +47,7 @@ def plot_size(n, kernels, samples, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("csv", type=Path)
+    parser.add_argument("csv", type=Path, nargs="+")
     parser.add_argument("--out-dir", type=Path, default=Path("docs/img"))
     args = parser.parse_args()
 

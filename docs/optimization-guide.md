@@ -51,7 +51,8 @@ cycle, and an FMA counts as 2 FLOPs, so one core peaks at `2 × 8 × 2 = 32` FLO
 
 E-cores add some throughput at lower clocks and with narrower execution, so the six-P-core
 figure is the honest yardstick. Laptop power and thermal limits move the real sustained clock,
-which is why results are reported with the date, machine, and power state.
+which is why results are reported with the date, machine, and power state. The measured
+`packed4x8_omp` result, 323 GFLOPS, is about 42% of the 768 GFLOPS six-P-core figure.
 
 ## 3. The kernels
 
@@ -153,8 +154,9 @@ strip, so no two threads write the same output and no locking is needed. Dynamic
 matters on a hybrid CPU: a strip on an E-core takes longer, and dynamic scheduling hands the next
 strip to whichever thread is free.
 
-At small `N` the parallel versions are not worth it: 256 / 64 = 4 strips cannot keep 16 threads
-busy, and thread start-up dominates a sub-millisecond multiply.
+At small `N` the parallel speedup is limited: 256 / 64 = 4 strips means at most four threads
+have work, and waking the thread team is a noticeable share of a sub-millisecond multiply. At
+`N = 2048` there are 32 strips and ten threads give about a 5.6× speedup over `packed4x8`.
 
 ## 4. Where the remaining gap is
 
