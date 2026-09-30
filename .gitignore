@@ -1,11 +1,13 @@
-# Binaries
-*.exe
-*.o
+# Build trees
+build/
+build-*/
 out/
 
-# Build artifacts
+# Binaries and objects
+*.exe
+*.o
 *.dll
 *.exe.stackdump
-results.txt
 
-*.full
+# Python
+__pycache__/
