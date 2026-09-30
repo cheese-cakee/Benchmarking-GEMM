@@ -10,7 +10,7 @@
 #include <immintrin.h>
 
 constexpr int FULL_N = 2048;
-constexpr int VERIFY_N = 64;
+constexpr int VERIFY_N = 100;
 constexpr int VISUAL_N = 4;
 constexpr int WARMUP_RUNS = 2;
 constexpr int TIMED_RUNS = 5;
@@ -38,12 +38,23 @@ void pack_B(const float* B, float* packed, int N, int k_start, int j_start, int 
     }
 }
 
+// Lanes [0, nr) enabled: selects the valid columns of a partial 8-wide tile.
+static __m256i tail_mask(int nr)
+{
+    return _mm256_setr_epi32(
+        nr > 0 ? -1 : 0, nr > 1 ? -1 : 0, nr > 2 ? -1 : 0, nr > 3 ? -1 : 0,
+        nr > 4 ? -1 : 0, nr > 5 ? -1 : 0, nr > 6 ? -1 : 0, nr > 7 ? -1 : 0
+    );
+}
+
 void gemm_packed_4x8(const float* A_packed, const float* B_packed, float* C, int N, int i, int j, int kc, int mc, int nr)
 {
-    __m256 acc0 = _mm256_setzero_ps();
-    __m256 acc1 = _mm256_setzero_ps();
-    __m256 acc2 = _mm256_setzero_ps();
-    __m256 acc3 = _mm256_setzero_ps();
+    // C already holds the partial sums of earlier k-tiles.
+    __m256i mask = tail_mask(nr);
+    __m256 acc0 = _mm256_maskload_ps(&C[(i + 0) * N + j], mask);
+    __m256 acc1 = _mm256_maskload_ps(&C[(i + 1) * N + j], mask);
+    __m256 acc2 = _mm256_maskload_ps(&C[(i + 2) * N + j], mask);
+    __m256 acc3 = _mm256_maskload_ps(&C[(i + 3) * N + j], mask);
 
     for(int kk = 0; kk < kc; kk++){
         __m256 b = _mm256_loadu_ps(&B_packed[kk * 8]);
@@ -64,10 +75,6 @@ void gemm_packed_4x8(const float* A_packed, const float* B_packed, float* C, int
         _mm256_storeu_ps(&C[(i+2)*N + j], acc2);
         _mm256_storeu_ps(&C[(i+3)*N + j], acc3);
     } else {
-        __m256i mask = _mm256_setr_epi32(
-            nr > 0 ? -1 : 0, nr > 1 ? -1 : 0, nr > 2 ? -1 : 0, nr > 3 ? -1 : 0,
-            nr > 4 ? -1 : 0, nr > 5 ? -1 : 0, nr > 6 ? -1 : 0, nr > 7 ? -1 : 0
-        );
         _mm256_maskstore_ps(&C[(i+0)*N + j], mask, acc0);
         _mm256_maskstore_ps(&C[(i+1)*N + j], mask, acc1);
         _mm256_maskstore_ps(&C[(i+2)*N + j], mask, acc2);
@@ -330,10 +337,12 @@ void gemm_blocked_4x8_packed_omp(const float* A, const float* B, float* C, int N
 void gemm_packed_4x8_prefetch(const float* A_packed, const float* B_packed, float* C,
                              int N, int i, int j, int kc, int mc, int nr)
 {
-    __m256 acc0 = _mm256_setzero_ps();
-    __m256 acc1 = _mm256_setzero_ps();
-    __m256 acc2 = _mm256_setzero_ps();
-    __m256 acc3 = _mm256_setzero_ps();
+    // C already holds the partial sums of earlier k-tiles.
+    __m256i mask = tail_mask(nr);
+    __m256 acc0 = _mm256_maskload_ps(&C[(i + 0) * N + j], mask);
+    __m256 acc1 = _mm256_maskload_ps(&C[(i + 1) * N + j], mask);
+    __m256 acc2 = _mm256_maskload_ps(&C[(i + 2) * N + j], mask);
+    __m256 acc3 = _mm256_maskload_ps(&C[(i + 3) * N + j], mask);
 
     if (kc > 1) {
         _mm_prefetch((const char*)&B_packed[1 * 8], _MM_HINT_NTA);
@@ -366,10 +375,6 @@ void gemm_packed_4x8_prefetch(const float* A_packed, const float* B_packed, floa
         _mm256_storeu_ps(&C[(i + 2) * N + j], acc2);
         _mm256_storeu_ps(&C[(i + 3) * N + j], acc3);
     } else {
-        __m256i mask = _mm256_setr_epi32(
-            nr > 0 ? -1 : 0, nr > 1 ? -1 : 0, nr > 2 ? -1 : 0, nr > 3 ? -1 : 0,
-            nr > 4 ? -1 : 0, nr > 5 ? -1 : 0, nr > 6 ? -1 : 0, nr > 7 ? -1 : 0
-        );
         _mm256_maskstore_ps(&C[(i + 0) * N + j], mask, acc0);
         _mm256_maskstore_ps(&C[(i + 1) * N + j], mask, acc1);
         _mm256_maskstore_ps(&C[(i + 2) * N + j], mask, acc2);
@@ -604,10 +609,10 @@ int main() {
         std::cout << std::left << std::setw(30) << "4X8+Prefetch OMP" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
     }
 
-    // --- 64x64 Correctness Check ---
+    // --- Correctness Check: N spans several k-tiles and has ragged edges ---
     {
-        std::cout << "--- Correctness Check (64x64) ---\n";
         const int N = VERIFY_N;
+        std::cout << "--- Correctness Check (" << N << "x" << N << ") ---\n";
         std::vector<float> A(N*N), B(N*N), C(N*N), Ref(N*N);
         init_matrix(A, N); init_matrix(B, N);
         gemm_register(A.data(), B.data(), Ref.data(), N);
@@ -626,15 +631,15 @@ int main() {
         gemm_avx2(A.data(), B.data(), C.data(), N);
         std::cout << std::left << std::setw(30) << "AVX2 (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_blocked_4x8(A.data(), B.data(), C.data(), N);
-        std::cout << std::left << std::setw(30) << "4X8 Microkernel (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "4X8 Microkernel" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_blocked_4x8_packed(A.data(), B.data(), C.data(), N);
-        std::cout << std::left << std::setw(30) << "4X8 Packed (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "4X8 Packed" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_blocked_4x8_packed_prefetch(A.data(), B.data(), C.data(), N);
-        std::cout << std::left << std::setw(30) << "4X8+Prefetch (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "4X8+Prefetch" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_blocked_4x8_packed_omp(A.data(), B.data(), C.data(), N);
-        std::cout << std::left << std::setw(30) << "4X8 Packed OMP (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
+        std::cout << std::left << std::setw(30) << "4X8 Packed OMP" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n";
         gemm_blocked_4x8_packed_prefetch_omp(A.data(), B.data(), C.data(), N);
-        std::cout << std::left << std::setw(30) << "4X8+Prefetch OMP (64x64)" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
+        std::cout << std::left << std::setw(30) << "4X8+Prefetch OMP" << (check_correctness(C.data(), Ref.data(), N) ? "PASS" : "FAIL") << "\n\n";
     }
 
     // --- 256x256 Benchmark (all kernels, fast) ---
