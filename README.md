@@ -252,6 +252,8 @@ The packed micro-kernel's register accumulators (`acc0..3`) are thread-local, so
 
 > **Why does packing help?** Without packing, the 4x8 kernel loads A and B with N-stride (2048-element gaps) — every access is a cache miss. Packing copies tiles into contiguous buffers where every load hits L1. Combined with C living in registers, the packed micro-kernel keeps the FMA units fed.
 
+> **Correctness note:** the packed kernels originally started each k-tile from zero and overwrote C, so for N > 64 only the last k-tile was kept. The old 64×64 check has a single k-tile and could not see this. The kernels now load C before accumulating, and the check runs at 100×100 (two k-tiles, ragged edges). The GFLOPS above were measured before this fix. In a later matched run (2048×2048, 10 threads, 10 alternating samples each) the fixed kernel's median was about 3% below the original's (384 vs 394 GFLOPS) with overlapping ranges; the table has not been re-measured.
+
 > **Why does OMP help so much?** At 2048×2048 each thread owns a 64-row horizontal strip (2048/10 ≈ 205 rows), so the working set per thread (~5 MB) fits in L2. The tile re-pack overhead is amortized across 32 micro-tiles per strip. The result is ~65% of theoretical AVX2 peak (770 GFLOPS = 6 P-cores × 128 GFLOPS each) — in the same efficiency band as production BLAS libraries.
 
 ## Theoretical Context
